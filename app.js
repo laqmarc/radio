@@ -61,6 +61,7 @@ const els = {
   playerArt: document.querySelector("#playerArt"),
   visualizerToggle: document.querySelector("#visualizerToggle"),
   tvToggle: document.querySelector("#tvToggle"),
+  resumePlaybackButton: document.querySelector("#resumePlaybackButton"),
   visualizerPanel: document.querySelector("#visualizerPanel"),
   visualizerCanvas: document.querySelector("#visualizerCanvas"),
   fullscreenVisualizerButton: document.querySelector("#fullscreenVisualizerButton"),
@@ -110,6 +111,7 @@ function bindEvents() {
   els.visualizerToggle.addEventListener("click", toggleVisualizer);
   els.tvToggle.addEventListener("click", openCurrentStationInTvMode);
   els.songFinderButton.addEventListener("click", openSongFinder);
+  els.resumePlaybackButton.addEventListener("click", resumeBlockedPlayback);
   els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
   els.exitTvButton.addEventListener("click", exitTvMode);
   document.addEventListener("fullscreenchange", resizeVisualizerCanvas);
@@ -121,6 +123,7 @@ function bindEvents() {
   els.audioPlayer.addEventListener("playing", () => {
     setStatus("Reproduint", "ok");
     updatePlayerStatus("Reproduint");
+    setPlaybackResumeVisible(false);
   });
   els.audioPlayer.addEventListener("error", handlePlaybackError);
 
@@ -1784,6 +1787,7 @@ function playStation(station, streamIndex = 0, options = {}) {
   state.currentStreamIndex = streamIndex;
   saveRecentStation(station);
   clearNowPlaying();
+  setPlaybackResumeVisible(false);
   if (station.nowPlayingTitle) {
     setNowPlaying(station.nowPlayingTitle);
   }
@@ -1799,8 +1803,9 @@ function playStation(station, streamIndex = 0, options = {}) {
   els.audioPlayer.play().catch(() => {
     setStatus("El navegador ha bloquejat la reproduccio", "error");
     updatePlayerStatus("Reproduccio bloquejada");
+    setPlaybackResumeVisible(true);
     if (!els.tvView.hidden) {
-      els.tvStationMeta.textContent = "Prem Sortir i torna a entrar, o inicia la reproduccio manualment";
+      els.tvStationMeta.textContent = "Prem Reprendre per iniciar la reproduccio";
     }
   });
 
@@ -1872,6 +1877,26 @@ function clearNowPlaying() {
   els.nowPlaying.hidden = true;
 }
 
+function setPlaybackResumeVisible(visible) {
+  els.resumePlaybackButton.hidden = !visible;
+}
+
+function resumeBlockedPlayback() {
+  if (!state.currentStation) {
+    setStatus("Tria una emissora abans", "error");
+    return;
+  }
+
+  els.audioPlayer.play().then(() => {
+    setPlaybackResumeVisible(false);
+    setStatus("Reproduint", "ok");
+    updatePlayerStatus("Reproduint");
+  }).catch(() => {
+    setStatus("No s'ha pogut reprendre", "error");
+    updatePlayerStatus("Encara bloquejada");
+  });
+}
+
 function canUseLocalProxy() {
   return location.protocol === "http:" || location.protocol === "https:";
 }
@@ -1889,11 +1914,13 @@ function handlePlaybackError() {
 
   if (station && nextIndex < streamUrls.length) {
     setStatus("Provant un altre stream", "ok");
+    setPlaybackResumeVisible(false);
     playStation(station, nextIndex);
     return;
   }
 
   setStatus("Error de reproduccio", "error");
+  setPlaybackResumeVisible(false);
   updatePlayerStatus("No s'ha pogut reproduir");
 }
 
