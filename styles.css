@@ -535,8 +535,6 @@ select:focus {
 .tv-icon {
   position: relative;
   display: block;
-
-.equalizer-panel,
   width: 22px;
   height: 15px;
   border: 2px solid currentColor;
@@ -545,89 +543,9 @@ select:focus {
 
 .tv-icon::before,
 .tv-icon::after {
-.equalizer-panel[hidden],
   content: "";
   position: absolute;
   background: currentColor;
-
-.equalizer-toolbar {
-  display: grid;
-  grid-template-columns: auto auto minmax(180px, 220px) minmax(220px, 1fr);
-  gap: 10px;
-  align-items: end;
-}
-
-.equalizer-select-field,
-.equalizer-preamp-field {
-  display: grid;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.equalizer-select-field select,
-.equalizer-preamp-field input {
-  min-height: 34px;
-}
-
-.equalizer-preamp-field {
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.equalizer-preamp-field span,
-.equalizer-preamp-field strong {
-  margin: 0;
-}
-
-.equalizer-preamp-field strong {
-  color: var(--ink);
-  font-size: 0.78rem;
-}
-
-.equalizer-support-note {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.equalizer-grid {
-  display: grid;
-  grid-template-columns: repeat(15, minmax(34px, 1fr));
-  gap: 8px;
-  align-items: end;
-}
-
-.equalizer-band {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.equalizer-gain,
-.equalizer-frequency {
-  font-size: 0.7rem;
-  text-align: center;
-}
-
-.equalizer-gain {
-  color: var(--accent-dark);
-  font-weight: 700;
-}
-
-.equalizer-frequency {
-  color: var(--muted);
-}
-
-.equalizer-slider {
-  width: 132px;
-  height: 28px;
-  margin: 52px 0;
-  accent-color: var(--accent);
-  transform: rotate(-90deg);
-}
 }
 
 .tv-icon::before {
@@ -683,6 +601,7 @@ audio {
   width: 100%;
 }
 
+.equalizer-panel,
 .visualizer-panel {
   display: grid;
   grid-column: 1 / -1;
@@ -691,6 +610,7 @@ audio {
   padding-top: 12px;
 }
 
+.equalizer-panel[hidden],
 .visualizer-panel[hidden] {
   display: none;
 }
