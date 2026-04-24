@@ -11,6 +11,7 @@ const MIME_TYPES = {
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
+  ".svg": "image/svg+xml; charset=utf-8",
 };
 
 const server = http.createServer((req, res) => {
@@ -69,7 +70,11 @@ server.listen(PORT, () => {
 });
 
 function serveStatic(requestUrl, res) {
-  const requestedPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
+  const requestedPath = requestUrl.pathname === "/"
+    ? "/index.html"
+    : requestUrl.pathname === "/favicon.ico"
+      ? "/favicon.svg"
+      : requestUrl.pathname;
   const filePath = path.resolve(ROOT, `.${decodeURIComponent(requestedPath)}`);
 
   if (!filePath.startsWith(ROOT)) {
