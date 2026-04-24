@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Directori de radios en directe amb Radio Browser">
+    <meta name="description" content="Directori de radios en directe amb Radio Browser i IPRD">
     <title>Radio Atlas</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <header class="app-header">
       <div>
-        <p class="eyebrow">Radio Browser</p>
+        <p class="eyebrow">Radio Browser + IPRD</p>
         <h1>Radio Quexulo</h1>
       </div>
       <div class="status-pill" id="apiStatus">Connectant</div>
@@ -45,6 +45,15 @@
         </label>
 
         <label>
+          <span>Font</span>
+          <select id="sourceSelect">
+            <option value="all">Totes</option>
+            <option value="radio-browser">Radio Browser</option>
+            <option value="iprd">IPRD</option>
+          </select>
+        </label>
+
+        <label>
           <span>Ordre</span>
           <select id="orderSelect">
             <option value="clickcount">Populars</option>
@@ -58,6 +67,7 @@
       <section class="quick-row" aria-label="Accions rapides">
         <button class="chip active" type="button" data-preset="all">Totes</button>
         <button class="chip" type="button" data-preset="favorites">Favorites</button>
+        <button class="chip" type="button" data-preset="recent">Recents</button>
         <!-- <button class="chip" type="button" data-preset="es">Espanya</button> -->
         <button class="chip" type="button" data-preset="ca">Catala</button>
         <button class="chip" type="button" data-preset="music">Musica</button>

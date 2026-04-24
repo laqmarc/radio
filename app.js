@@ -1,6 +1,9 @@
 const API_BASE = "https://de1.api.radio-browser.info";
+const IPRD_CATALOG_URL = "https://iprd-org.github.io/iprd/site_data/metadata/catalog.json";
 const PAGE_SIZE = 50;
 const FAVORITES_KEY = "radio-atlas-favorites";
+const RECENTS_KEY = "radio-atlas-recents";
+const countryCodeCache = new Map();
 
 const state = {
   stations: [],
@@ -8,7 +11,11 @@ const state = {
   loading: false,
   preset: "all",
   favorites: readFavorites(),
+  recents: readRecents(),
   hasMore: true,
+  iprdStations: null,
+  currentStation: null,
+  currentStreamIndex: 0,
 };
 
 const els = {
@@ -17,6 +24,7 @@ const els = {
   countrySelect: document.querySelector("#countrySelect"),
   languageSelect: document.querySelector("#languageSelect"),
   codecSelect: document.querySelector("#codecSelect"),
+  sourceSelect: document.querySelector("#sourceSelect"),
   orderSelect: document.querySelector("#orderSelect"),
   stationGrid: document.querySelector("#stationGrid"),
   resultTitle: document.querySelector("#resultTitle"),
@@ -51,9 +59,17 @@ function bindEvents() {
   els.countrySelect.addEventListener("change", () => loadStations(true));
   els.languageSelect.addEventListener("change", () => loadStations(true));
   els.codecSelect.addEventListener("change", () => loadStations(true));
+  els.sourceSelect.addEventListener("change", () => loadStations(true));
   els.orderSelect.addEventListener("change", () => loadStations(true));
   els.refreshButton.addEventListener("click", () => loadStations(true));
   els.loadMoreButton.addEventListener("click", () => loadStations(false));
+  els.audioPlayer.addEventListener("loadstart", () => updatePlayerStatus("Connectant..."));
+  els.audioPlayer.addEventListener("waiting", () => updatePlayerStatus("Connectant..."));
+  els.audioPlayer.addEventListener("playing", () => {
+    setStatus("Reproduint", "ok");
+    updatePlayerStatus("Reproduint");
+  });
+  els.audioPlayer.addEventListener("error", handlePlaybackError);
 
   document.querySelectorAll("[data-preset]").forEach((button) => {
     button.addEventListener("click", () => applyPreset(button.dataset.preset));
@@ -71,7 +87,7 @@ async function loadFilterOptions() {
     fillSelect(els.countrySelect, countries.slice(0, 180), "name", "iso_3166_1", "Tots");
     fillSelect(els.languageSelect, languages.slice(0, 120), "name", "name", "Tots");
     fillSelect(els.codecSelect, codecs.slice(0, 50), "name", "name", "Tots");
-    setStatus("API connectada", "ok");
+    setStatus("APIs connectades", "ok");
   } catch (error) {
     console.error(error);
     setStatus("Filtres no disponibles", "error");
@@ -92,17 +108,22 @@ async function loadStations(reset) {
     return;
   }
 
+  if (state.preset === "recent") {
+    renderRecents();
+    return;
+  }
+
   state.loading = true;
   renderLoading(reset);
 
   try {
-    const params = buildSearchParams();
-    const items = await getJson(`/json/stations/search?${params.toString()}`);
+    const items = await loadStationsForSelectedSource();
+
     state.stations = reset ? items : state.stations.concat(items);
     state.offset += items.length;
     state.hasMore = items.length === PAGE_SIZE;
     renderStations();
-    setStatus("API connectada", "ok");
+    setStatus("APIs connectades", "ok");
   } catch (error) {
     console.error(error);
     setStatus("Error de connexio", "error");
@@ -112,7 +133,93 @@ async function loadStations(reset) {
   }
 }
 
-function buildSearchParams() {
+async function loadStationsForSelectedSource() {
+  if (els.sourceSelect.value === "radio-browser") {
+    return loadRadioBrowserStations();
+  }
+
+  if (els.sourceSelect.value === "iprd") {
+    return loadIprdStations();
+  }
+
+  return loadAllSourcesStations();
+}
+
+async function loadAllSourcesStations() {
+  const results = await Promise.allSettled([
+    loadRadioBrowserStations(),
+    loadIprdStations(),
+  ]);
+  const [radioBrowserStations, iprdStations] = results.map((result) => (
+    result.status === "fulfilled" ? result.value : []
+  ));
+
+  if (!radioBrowserStations.length && !iprdStations.length) {
+    throw new Error("Cap font ha retornat emissores");
+  }
+
+  return dedupeStations(interleaveStations(radioBrowserStations, iprdStations)).slice(0, PAGE_SIZE);
+}
+
+async function loadRadioBrowserStations() {
+  const params = buildRadioBrowserParams();
+  const items = await getJson(`/json/stations/search?${params.toString()}`);
+  return items.map(normalizeRadioBrowserStation);
+}
+
+async function loadIprdStations() {
+  const catalog = await getIprdCatalog();
+  const filtered = catalog
+    .filter(matchesIprdFilters)
+    .sort(sortIprdStations);
+
+  return filtered
+    .slice(state.offset, state.offset + PAGE_SIZE)
+    .map(normalizeIprdStation);
+}
+
+function interleaveStations(...groups) {
+  const results = [];
+  const longest = Math.max(...groups.map((group) => group.length));
+
+  for (let index = 0; index < longest; index += 1) {
+    groups.forEach((group) => {
+      if (group[index]) {
+        results.push(group[index]);
+      }
+    });
+  }
+
+  return results;
+}
+
+function dedupeStations(stations) {
+  const seen = new Set();
+
+  return stations.filter((station) => {
+    const streamKey = normalizeDedupeText(station.streamUrl || station.url_resolved || station.url);
+    const nameCountryKey = normalizeDedupeText(`${station.name || ""}|${station.country || ""}`);
+    const keys = [streamKey, nameCountryKey].filter(Boolean);
+
+    if (keys.some((key) => seen.has(key))) {
+      return false;
+    }
+
+    keys.forEach((key) => seen.add(key));
+    return true;
+  });
+}
+
+function normalizeDedupeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildRadioBrowserParams() {
   const params = new URLSearchParams({
     limit: PAGE_SIZE,
     offset: state.offset,
@@ -148,6 +255,26 @@ async function getJson(path) {
   return response.json();
 }
 
+async function getIprdCatalog() {
+  if (state.iprdStations) {
+    return state.iprdStations;
+  }
+
+  const response = await fetch(IPRD_CATALOG_URL, {
+    headers: {
+      "Accept": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`IPRD ha retornat ${response.status}`);
+  }
+
+  const catalog = await response.json();
+  state.iprdStations = Array.isArray(catalog.stations) ? catalog.stations : [];
+  return state.iprdStations;
+}
+
 function fillSelect(select, items, labelKey, valueKey, defaultLabel) {
   const currentValue = select.value;
   select.replaceChildren(new Option(defaultLabel, ""));
@@ -160,6 +287,144 @@ function fillSelect(select, items, labelKey, valueKey, defaultLabel) {
     });
 
   select.value = currentValue;
+}
+
+function matchesIprdFilters(station) {
+  const search = els.searchInput.value.trim().toLowerCase();
+  const tags = Array.isArray(station.tags) ? station.tags : [];
+  const genres = Array.isArray(station.genres) ? station.genres : [];
+  const streams = Array.isArray(station.streams) ? station.streams : [];
+  const searchableText = [
+    station.name,
+    station.country,
+    station.language,
+    station.website,
+    ...tags,
+    ...genres,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (search && !searchableText.includes(search)) return false;
+  if (els.countrySelect.value && getCountryCode(station.country) !== els.countrySelect.value) return false;
+  if (els.languageSelect.value && !hasIprdLanguage(station, els.languageSelect.value.toLowerCase())) return false;
+  if (els.codecSelect.value && !streams.some((stream) => String(stream.format || "").toLowerCase() === els.codecSelect.value.toLowerCase())) return false;
+  if (state.preset === "music" && !hasIprdTerm(station, "music")) return false;
+  if (state.preset === "news" && !hasIprdTerm(station, "news")) return false;
+  if (state.preset === "ca" && !hasIprdLanguage(station, "catalan") && !hasIprdTerm(station, "catalan")) return false;
+
+  return streams.some((stream) => stream.url);
+}
+
+function hasIprdTerm(station, term) {
+  const values = []
+    .concat(station.tags || [])
+    .concat(station.genres || [])
+    .map((value) => String(value).toLowerCase());
+  return values.some((value) => value.includes(term));
+}
+
+function hasIprdLanguage(station, language) {
+  const languages = Array.isArray(station.language) ? station.language : [station.language];
+  return languages.some((value) => String(value).toLowerCase() === language);
+}
+
+function sortIprdStations(a, b) {
+  const order = els.orderSelect.value;
+
+  if (order === "name") {
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  }
+
+  if (order === "changetimestamp") {
+    return Date.parse(b.lastChecked || 0) - Date.parse(a.lastChecked || 0);
+  }
+
+  return getBestReliability(b) - getBestReliability(a);
+}
+
+function getBestReliability(station) {
+  const streams = Array.isArray(station.streams) ? station.streams : [];
+  return streams.reduce((best, stream) => Math.max(best, Number(stream.reliability) || 0), 0);
+}
+
+function normalizeRadioBrowserStation(station) {
+  return {
+    ...station,
+    source: "Radio Browser",
+    streamUrl: station.url_resolved || station.url,
+    streamUrls: [station.url_resolved || station.url].filter(Boolean),
+    tagsList: String(station.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
+    statLabel: "Vots",
+    statValue: station.votes || 0,
+  };
+}
+
+function normalizeIprdStation(station) {
+  const stream = getBestIprdStream(station);
+  const streams = getSortedIprdStreams(station);
+  const tagsList = []
+    .concat(station.genres || [])
+    .concat(station.tags || [])
+    .filter(Boolean);
+
+  return {
+    stationuuid: `iprd:${station.id || station.name}`,
+    name: station.name,
+    country: station.country,
+    state: "",
+    language: Array.isArray(station.language) ? station.language.join(", ") : station.language,
+    codec: stream.format || "",
+    bitrate: stream.bitrate || 0,
+    favicon: station.logo || "",
+    homepage: station.website || "",
+    source: "IPRD",
+    streamUrl: stream.url,
+    streamUrls: streams.map((item) => item.url).filter(Boolean),
+    url: stream.url,
+    url_resolved: stream.url,
+    tagsList: [...new Set(tagsList)],
+    statLabel: "Fiabilitat",
+    statValue: stream.reliability ? `${Math.round(Number(stream.reliability) * 100)}%` : "n/d",
+  };
+}
+
+function getBestIprdStream(station) {
+  return getSortedIprdStreams(station)[0] || {};
+}
+
+function getSortedIprdStreams(station) {
+  const streams = Array.isArray(station.streams) ? station.streams : [];
+  return streams
+    .filter((stream) => stream.url)
+    .sort((a, b) => {
+      const reliabilityDiff = (Number(b.reliability) || 0) - (Number(a.reliability) || 0);
+      return reliabilityDiff || ((Number(b.bitrate) || 0) - (Number(a.bitrate) || 0));
+    });
+}
+
+function getCountryCode(countryName) {
+  if (!countryName || typeof Intl === "undefined" || !Intl.DisplayNames) {
+    return "";
+  }
+
+  const cacheKey = String(countryName).toLowerCase();
+  if (countryCodeCache.has(cacheKey)) {
+    return countryCodeCache.get(cacheKey);
+  }
+
+  const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+  for (let first = 65; first <= 90; first += 1) {
+    for (let second = 65; second <= 90; second += 1) {
+      const countryCode = String.fromCharCode(first, second);
+      if (displayNames.of(countryCode)?.toLowerCase() === String(countryName).toLowerCase()) {
+        countryCodeCache.set(cacheKey, countryCode);
+        return countryCode;
+      }
+    }
+  }
+
+  countryCodeCache.set(cacheKey, "");
+  return "";
 }
 
 function applyPreset(preset) {
@@ -220,14 +485,28 @@ function renderFavorites() {
   bindStationButtons();
 }
 
+function renderRecents() {
+  const recents = [...state.recents.values()];
+  els.resultTitle.textContent = "Recents";
+  els.resultMeta.textContent = recents.length
+    ? `${recents.length} emissores escoltades recentment`
+    : "Encara no has escoltat cap emissora";
+  els.loadMoreButton.hidden = true;
+
+  els.stationGrid.innerHTML = recents.length
+    ? recents.map(renderStationCard).join("")
+    : `<div class="empty-state">Les emissores que escoltis apareixeran aqui.</div>`;
+
+  bindStationButtons();
+}
+
 function renderStationCard(station) {
   const title = escapeHtml(station.name || "Radio sense nom");
-  const location = escapeHtml([station.country, station.state].filter(Boolean).join(" · ") || "Ubicacio desconeguda");
+  const location = escapeHtml([station.country, station.state, station.source].filter(Boolean).join(" - ") || "Ubicacio desconeguda");
   const codec = escapeHtml(station.codec || "n/d");
   const bitrate = station.bitrate ? `${station.bitrate} kbps` : "n/d";
-  const tags = (station.tags || "")
-    .split(",")
-    .map((tag) => tag.trim())
+  const tags = (station.tagsList || String(station.tags || "").split(","))
+    .map((tag) => String(tag).trim())
     .filter(Boolean)
     .slice(0, 3);
   const initials = getInitials(station.name);
@@ -251,11 +530,12 @@ function renderStationCard(station) {
       <div class="station-stats">
         <div class="stat"><span>Codec</span><strong>${codec}</strong></div>
         <div class="stat"><span>Bitrate</span><strong>${bitrate}</strong></div>
-        <div class="stat"><span>Vots</span><strong>${station.votes || 0}</strong></div>
+        <div class="stat"><span>${escapeHtml(station.statLabel || "Vots")}</span><strong>${escapeHtml(station.statValue ?? station.votes ?? 0)}</strong></div>
       </div>
       <div class="station-actions">
         <button class="station-action play" type="button" data-play="${escapeAttribute(station.stationuuid)}">Escolta</button>
-        <button class="station-action favorite ${saved ? "saved" : ""}" type="button" data-favorite="${escapeAttribute(station.stationuuid)}" aria-label="Desa favorit">${saved ? "★" : "☆"}</button>
+        <button class="station-action info" type="button" data-info="${escapeAttribute(station.stationuuid)}">Info</button>
+        <button class="station-action favorite ${saved ? "saved" : ""}" type="button" data-favorite="${escapeAttribute(station.stationuuid)}" aria-label="Desa favorit">${saved ? "*" : "+"}</button>
       </div>
     </article>
   `;
@@ -275,34 +555,156 @@ function bindStationButtons() {
       if (station) toggleFavorite(station);
     });
   });
+
+  els.stationGrid.querySelectorAll("[data-info]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const station = findStation(button.dataset.info);
+      if (station) showStationDetails(station);
+    });
+  });
 }
 
 function findStation(uuid) {
   return state.stations.find((station) => station.stationuuid === uuid)
-    || state.favorites.get(uuid);
+    || state.favorites.get(uuid)
+    || state.recents.get(uuid);
 }
 
-function playStation(station) {
-  const streamUrl = station.url_resolved || station.url;
+function showStationDetails(station) {
+  closeStationDetails();
+
+  const streamUrls = station.streamUrls?.length
+    ? station.streamUrls
+    : [station.streamUrl || station.url_resolved || station.url].filter(Boolean);
+  const tags = (station.tagsList || String(station.tags || "").split(","))
+    .map((tag) => String(tag).trim())
+    .filter(Boolean);
+
+  const dialog = document.createElement("div");
+  dialog.className = "modal-backdrop";
+  dialog.innerHTML = `
+    <section class="station-modal" role="dialog" aria-modal="true" aria-label="Detall de l'emissora">
+      <button class="modal-close" type="button" data-close-modal aria-label="Tanca">x</button>
+      <div class="modal-header">
+        <div class="modal-logo">${station.favicon ? `<img src="${escapeAttribute(station.favicon)}" alt="" onerror="this.remove()">` : escapeHtml(getInitials(station.name))}</div>
+        <div>
+          <p class="modal-source">${escapeHtml(station.source || "Font desconeguda")}</p>
+          <h2>${escapeHtml(station.name || "Radio sense nom")}</h2>
+          <p>${escapeHtml([station.country, station.state, station.language].filter(Boolean).join(" - ") || "Sense ubicacio")}</p>
+        </div>
+      </div>
+      <div class="detail-grid">
+        ${renderDetailItem("Codec", station.codec || "n/d")}
+        ${renderDetailItem("Bitrate", station.bitrate ? `${station.bitrate} kbps` : "n/d")}
+        ${renderDetailItem(station.statLabel || "Vots", station.statValue ?? station.votes ?? "n/d")}
+        ${renderDetailItem("Streams", streamUrls.length || "n/d")}
+      </div>
+      <div class="modal-tags">
+        ${tags.length ? tags.slice(0, 12).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") : `<span class="tag">radio</span>`}
+      </div>
+      <div class="detail-links">
+        ${station.homepage ? `<a href="${escapeAttribute(station.homepage)}" target="_blank" rel="noreferrer">Web oficial</a>` : ""}
+        ${streamUrls[0] ? `<a href="${escapeAttribute(streamUrls[0])}" target="_blank" rel="noreferrer">Obre stream</a>` : ""}
+      </div>
+      <label class="stream-field">
+        <span>URL stream</span>
+        <input value="${escapeAttribute(streamUrls[0] || "")}" readonly>
+      </label>
+    </section>
+  `;
+
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog || event.target.closest("[data-close-modal]")) {
+      closeStationDetails();
+    }
+  });
+
+  document.addEventListener("keydown", handleModalKeydown);
+  document.body.append(dialog);
+  dialog.querySelector("[data-close-modal]").focus();
+}
+
+function renderDetailItem(label, value) {
+  return `
+    <div class="detail-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function closeStationDetails() {
+  document.querySelector(".modal-backdrop")?.remove();
+  document.removeEventListener("keydown", handleModalKeydown);
+}
+
+function handleModalKeydown(event) {
+  if (event.key === "Escape") {
+    closeStationDetails();
+  }
+}
+
+function playStation(station, streamIndex = 0) {
+  const streamUrls = station.streamUrls?.length
+    ? station.streamUrls
+    : [station.streamUrl || station.url_resolved || station.url].filter(Boolean);
+  const streamUrl = streamUrls[streamIndex];
 
   if (!streamUrl) {
     setStatus("Stream no disponible", "error");
+    updatePlayerStatus("Stream no disponible");
     return;
   }
 
+  state.currentStation = station;
+  state.currentStreamIndex = streamIndex;
+  saveRecentStation(station);
   els.audioPlayer.src = streamUrl;
   els.audioPlayer.play().catch(() => {
     setStatus("El navegador ha bloquejat la reproduccio", "error");
+    updatePlayerStatus("Reproduccio bloquejada");
   });
 
   els.playerName.textContent = station.name || "Radio sense nom";
-  els.playerMeta.textContent = [station.country, station.codec, station.bitrate ? `${station.bitrate} kbps` : ""]
-    .filter(Boolean)
-    .join(" · ");
+  updatePlayerStatus("Connectant...");
   els.playerArt.textContent = getInitials(station.name);
-  setStatus("Reproduint", "ok");
+  setStatus("Connectant", "ok");
 
-  fetch(`${API_BASE}/json/url/${station.stationuuid}`).catch(() => {});
+  if (station.source === "Radio Browser") {
+    fetch(`${API_BASE}/json/url/${station.stationuuid}`).catch(() => {});
+  }
+}
+
+function saveRecentStation(station) {
+  state.recents.delete(station.stationuuid);
+  state.recents = new Map([[station.stationuuid, station], ...state.recents].slice(0, 20));
+  writeRecents();
+}
+
+function handlePlaybackError() {
+  const station = state.currentStation;
+  const streamUrls = station?.streamUrls || [];
+  const nextIndex = state.currentStreamIndex + 1;
+
+  if (station && nextIndex < streamUrls.length) {
+    setStatus("Provant un altre stream", "ok");
+    playStation(station, nextIndex);
+    return;
+  }
+
+  setStatus("Error de reproduccio", "error");
+  updatePlayerStatus("No s'ha pogut reproduir");
+}
+
+function updatePlayerStatus(statusText) {
+  const station = state.currentStation;
+  const details = station
+    ? [station.country, station.codec, station.bitrate ? `${station.bitrate} kbps` : ""]
+      .filter(Boolean)
+      .join(" - ")
+    : "Tria una radio per escoltar-la";
+
+  els.playerMeta.textContent = station ? `${statusText} - ${details}` : details;
 }
 
 function toggleFavorite(station) {
@@ -342,6 +744,19 @@ function readFavorites() {
 
 function writeFavorites() {
   localStorage.setItem(FAVORITES_KEY, JSON.stringify([...state.favorites.values()]));
+}
+
+function readRecents() {
+  try {
+    const items = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]");
+    return new Map(items.map((station) => [station.stationuuid, station]));
+  } catch {
+    return new Map();
+  }
+}
+
+function writeRecents() {
+  localStorage.setItem(RECENTS_KEY, JSON.stringify([...state.recents.values()]));
 }
 
 function getInitials(name = "") {
