@@ -581,20 +581,6 @@ audio {
   width: 100%;
 }
 
-.resume-playback-button {
-  min-height: 40px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  padding: 0 14px;
-  font-weight: 850;
-}
-
-.resume-playback-button[hidden] {
-  display: none;
-}
-
 .visualizer-panel {
   display: grid;
   grid-column: 1 / -1;
