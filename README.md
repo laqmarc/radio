@@ -22,6 +22,7 @@ Web estatica per explorar emissores de radio de [Radio Browser](https://www.radi
 - Enllacos compartibles d'emissora amb format `#/station/{font}/{id}` i boto `Comparteix` al modal.
 - Mode pantalla gran amb format `?view=tv#/station/{font}/{id}`, logo, hora i visualitzador gran.
 - Metadades ICY opcionals per mostrar `Ara sona` quan l'emissora publica titol de canco o programa.
+- Boto flotant `Que sona?` que usa metadades gratuites de la radio i enriqueix resultats amb iTunes Search i MusicBrainz.
 - Paginacio amb boto `Carrega mes`.
 - Filtre `hidebroken=true` per evitar emissores marcades com trencades.
 
@@ -87,6 +88,11 @@ https://iprd-org.github.io/iprd/site_data/metadata/catalog.json
 ```
 
 Radio Browser es carrega per pagines amb `limit` i `offset`. IPRD es descarrega com a cataleg JSON i despres es filtra i pagina al navegador. CasterClub es consulta a traves del servidor local amb `/sources/casterclub`, per evitar problemes de CORS i convertir el seu HTML a dades. El cataleg propi viu a `data/custom-stations.json`. Quan la font es `Totes`, l'app barreja resultats de totes les fonts i elimina duplicats simples per URL del stream i per nom+pais.
+
+La funcio `Que sona?` no reconeix audio per fingerprint encara. Primer aprofita `StreamTitle`/now playing de la radio i consulta `/song/search`, que combina APIs gratuites sense clau:
+
+- iTunes Search API per portada, album, artista, preview i enllac.
+- MusicBrainz per coincidencies obertes i enllacos de base de dades musical.
 
 Per afegir emissores propies, edita `data/custom-stations.json` i puja el canvi al servidor. La font apareix com `Quexulo` al selector.
 

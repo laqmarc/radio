@@ -36,6 +36,7 @@ const state = {
   filtersMobileMode: null,
   metadataSource: null,
   nowPlaying: "",
+  songLookupCache: new Map(),
 };
 
 const els = {
@@ -74,6 +75,7 @@ const els = {
   tvCanvas: document.querySelector("#tvCanvas"),
   tvModeButton: document.querySelector("#tvModeButton"),
   exitTvButton: document.querySelector("#exitTvButton"),
+  songFinderButton: document.querySelector("#songFinderButton"),
 };
 
 const debounce = (fn, wait = 350) => {
@@ -111,6 +113,7 @@ function bindEvents() {
   els.loadMoreButton.addEventListener("click", () => loadStations(false));
   els.visualizerToggle.addEventListener("click", toggleVisualizer);
   els.tvToggle.addEventListener("click", openCurrentStationInTvMode);
+  els.songFinderButton.addEventListener("click", openSongFinder);
   els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
   els.tvModeButton.addEventListener("click", toggleTvVisualizerMode);
   els.exitTvButton.addEventListener("click", exitTvMode);
@@ -1543,6 +1546,223 @@ function renderDetailItem(label, value) {
   `;
 }
 
+async function openSongFinder() {
+  closeSongFinder();
+
+  const source = getCurrentSongText();
+  const parsed = parseSongText(source.text);
+  const dialog = document.createElement("div");
+  dialog.className = "modal-backdrop song-modal-backdrop";
+  dialog.innerHTML = renderSongFinderShell(source, parsed);
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog || event.target.closest("[data-close-song-modal]")) {
+      closeSongFinder();
+    }
+  });
+
+  document.addEventListener("keydown", handleSongFinderKeydown);
+  document.body.append(dialog);
+  dialog.querySelector("[data-close-song-modal]").focus();
+
+  if (!source.text) {
+    renderSongFinderMessage("No tinc cap pista encara. Espera uns segons amb la radio sonant o prova una altra emissora.");
+    return;
+  }
+
+  await enrichCurrentSong(source.text, parsed);
+}
+
+function renderSongFinderShell(source, parsed) {
+  const title = parsed.title && parsed.artist
+    ? `${parsed.artist} - ${parsed.title}`
+    : source.text || "Sense metadades";
+
+  return `
+    <section class="station-modal song-modal" role="dialog" aria-modal="true" aria-label="Que sona">
+      <button class="modal-close" type="button" data-close-song-modal aria-label="Tanca">x</button>
+      <div class="modal-header">
+        <div class="song-modal-icon">
+          <svg class="song-finder-icon" aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+        </div>
+        <div>
+          <p class="modal-source">${escapeHtml(source.label)}</p>
+          <h2>Que sona?</h2>
+          <p>${escapeHtml(title)}</p>
+        </div>
+      </div>
+      <div class="song-finder-status" id="songFinderStatus">Buscant dades gratuites...</div>
+      <div class="song-results" id="songResults"></div>
+    </section>
+  `;
+}
+
+async function enrichCurrentSong(rawText, parsed) {
+  const query = parsed.artist && parsed.title ? `${parsed.artist} ${parsed.title}` : rawText;
+  const cacheKey = normalizeDedupeText(query);
+
+  if (state.songLookupCache.has(cacheKey)) {
+    renderSongFinderResults(state.songLookupCache.get(cacheKey), parsed);
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({ q: query });
+    if (parsed.artist) params.set("artist", parsed.artist);
+    if (parsed.title) params.set("title", parsed.title);
+
+    const response = await fetch(`/song/search?${params.toString()}`, {
+      headers: {
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Song search ha retornat ${response.status}`);
+    }
+
+    const payload = await response.json();
+    state.songLookupCache.set(cacheKey, payload);
+    renderSongFinderResults(payload, parsed);
+  } catch (error) {
+    console.error(error);
+    renderSongFinderMessage("He trobat el text de l'emissora, pero no he pogut enriquir-lo ara mateix.");
+  }
+}
+
+function renderSongFinderResults(payload, parsed) {
+  const resultsContainer = document.querySelector("#songResults");
+  const status = document.querySelector("#songFinderStatus");
+  if (!resultsContainer || !status) return;
+
+  const itunes = Array.isArray(payload.itunes) ? payload.itunes : [];
+  const musicbrainz = Array.isArray(payload.musicbrainz) ? payload.musicbrainz : [];
+  const primary = pickBestSongResult(itunes, parsed) || itunes[0];
+
+  if (!primary && !musicbrainz.length) {
+    renderSongFinderMessage("Tinc una pista, pero no he trobat cap coincidencia clara a iTunes ni MusicBrainz.");
+    return;
+  }
+
+  status.textContent = primary ? "Coincidencia gratuita trobada" : "Coincidencies de MusicBrainz";
+  resultsContainer.innerHTML = `
+    ${primary ? renderPrimarySongResult(primary) : ""}
+    ${musicbrainz.length ? `
+      <div class="song-secondary">
+        <h3>Altres coincidencies</h3>
+        ${musicbrainz.slice(0, 4).map(renderSecondarySongResult).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function pickBestSongResult(results, parsed) {
+  if (!parsed.artist || !parsed.title) return results[0] || null;
+
+  const artist = parsed.artist.toLowerCase();
+  const title = parsed.title.toLowerCase();
+  return results.find((item) => (
+    String(item.artist || "").toLowerCase().includes(artist)
+    && String(item.title || "").toLowerCase().includes(title)
+  )) || results[0] || null;
+}
+
+function renderPrimarySongResult(result) {
+  return `
+    <article class="song-primary">
+      <div class="song-artwork">${result.artwork ? `<img src="${escapeAttribute(result.artwork)}" alt="" loading="lazy">` : `<svg class="song-finder-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`}</div>
+      <div>
+        <p class="modal-source">${escapeHtml(result.source || "iTunes")}</p>
+        <h3>${escapeHtml(result.title || "Titol desconegut")}</h3>
+        <p>${escapeHtml([result.artist, result.album].filter(Boolean).join(" - ") || "Artista desconegut")}</p>
+        ${result.releaseDate ? `<span>${escapeHtml(String(result.releaseDate).slice(0, 10))}</span>` : ""}
+        <div class="detail-links song-links">
+          ${result.url ? `<a href="${escapeAttribute(result.url)}" target="_blank" rel="noreferrer">Obre fitxa</a>` : ""}
+          ${result.previewUrl ? `<a href="${escapeAttribute(result.previewUrl)}" target="_blank" rel="noreferrer">Preview</a>` : ""}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderSecondarySongResult(result) {
+  return `
+    <a class="song-secondary-row" href="${escapeAttribute(result.url || "#")}" target="_blank" rel="noreferrer">
+      <strong>${escapeHtml(result.title || "Titol desconegut")}</strong>
+      <span>${escapeHtml([result.artist, result.album, result.releaseDate].filter(Boolean).join(" - "))}</span>
+    </a>
+  `;
+}
+
+function renderSongFinderMessage(message) {
+  const status = document.querySelector("#songFinderStatus");
+  const resultsContainer = document.querySelector("#songResults");
+  if (status) status.textContent = "Sense coincidencia clara";
+  if (resultsContainer) {
+    resultsContainer.innerHTML = `<div class="empty-state">${escapeHtml(message)}</div>`;
+  }
+}
+
+function getCurrentSongText() {
+  if (state.nowPlaying) {
+    return { text: state.nowPlaying, label: "Metadades de la radio" };
+  }
+
+  if (state.currentStation?.nowPlayingTitle) {
+    return { text: state.currentStation.nowPlayingTitle, label: "Dades de la font" };
+  }
+
+  return { text: "", label: "Sense metadades" };
+}
+
+function parseSongText(value) {
+  let text = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b(on air|now playing|playing now|ara sona)\b:?/gi, "")
+    .replace(/\[[^\]]*]/g, "")
+    .replace(/\([^)]*(radio|live|official|remaster|advert|publi)[^)]*\)/gi, "")
+    .trim();
+
+  text = text.replace(/^[-:|]+|[-:|]+$/g, "").trim();
+  const byMatch = text.match(/^(.+?)\s+by\s+(.+)$/i);
+  if (byMatch) {
+    return cleanParsedSong(byMatch[2], byMatch[1], text);
+  }
+
+  const separators = [" - ", " – ", " — ", " :: ", " | "];
+  for (const separator of separators) {
+    if (text.includes(separator)) {
+      const [artist, ...titleParts] = text.split(separator);
+      return cleanParsedSong(artist, titleParts.join(separator), text);
+    }
+  }
+
+  return { artist: "", title: text, query: text };
+}
+
+function cleanParsedSong(artist, title, fallback) {
+  return {
+    artist: String(artist || "").replace(/^artist:/i, "").trim(),
+    title: String(title || "").replace(/^title:/i, "").trim(),
+    query: fallback,
+  };
+}
+
+function closeSongFinder() {
+  document.querySelector(".song-modal-backdrop")?.remove();
+  document.removeEventListener("keydown", handleSongFinderKeydown);
+}
+
+function handleSongFinderKeydown(event) {
+  if (event.key === "Escape") {
+    closeSongFinder();
+  }
+}
+
 function closeStationDetails() {
   document.querySelector(".modal-backdrop")?.remove();
   document.removeEventListener("keydown", handleModalKeydown);
@@ -1570,6 +1790,9 @@ function playStation(station, streamIndex = 0, options = {}) {
   state.currentStreamIndex = streamIndex;
   saveRecentStation(station);
   clearNowPlaying();
+  if (station.nowPlayingTitle) {
+    setNowPlaying(station.nowPlayingTitle);
+  }
   startMetadataStream(streamUrl);
   if (options.updateRoute !== false) {
     updateStationRoute(station);

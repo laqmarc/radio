@@ -46,6 +46,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (requestUrl.pathname === "/song/search") {
+    searchSong(requestUrl, res);
+    return;
+  }
+
   serveStatic(requestUrl, res);
 });
 
@@ -300,6 +305,96 @@ function getCasterClubStations(requestUrl, res) {
       source: "CasterClub",
       page,
       stations: parseCasterClubDirectory(html),
+    });
+  });
+}
+
+function searchSong(requestUrl, res) {
+  const rawQuery = String(requestUrl.searchParams.get("q") || "").trim().slice(0, 160);
+  const artist = String(requestUrl.searchParams.get("artist") || "").trim().slice(0, 120);
+  const title = String(requestUrl.searchParams.get("title") || "").trim().slice(0, 120);
+  const query = rawQuery || [artist, title].filter(Boolean).join(" ");
+
+  if (!query) {
+    sendJson(res, 400, { error: "Missing query" });
+    return;
+  }
+
+  Promise.allSettled([
+    searchItunes(query),
+    searchMusicBrainz(query, artist, title),
+  ]).then((results) => {
+    const [itunesResult, musicBrainzResult] = results;
+    sendJson(res, 200, {
+      query,
+      itunes: itunesResult.status === "fulfilled" ? itunesResult.value : [],
+      musicbrainz: musicBrainzResult.status === "fulfilled" ? musicBrainzResult.value : [],
+    });
+  });
+}
+
+function searchItunes(query) {
+  const target = new URL("https://itunes.apple.com/search");
+  target.searchParams.set("term", query);
+  target.searchParams.set("media", "music");
+  target.searchParams.set("entity", "song");
+  target.searchParams.set("limit", "5");
+  target.searchParams.set("country", "ES");
+
+  return requestJson(target).then((payload) => (
+    Array.isArray(payload.results) ? payload.results.map((item) => ({
+      source: "iTunes",
+      artist: item.artistName || "",
+      title: item.trackName || "",
+      album: item.collectionName || "",
+      artwork: String(item.artworkUrl100 || "").replace("100x100", "600x600"),
+      url: item.trackViewUrl || item.collectionViewUrl || "",
+      previewUrl: item.previewUrl || "",
+      releaseDate: item.releaseDate || "",
+    })) : []
+  ));
+}
+
+function searchMusicBrainz(query, artist, title) {
+  const target = new URL("https://musicbrainz.org/ws/2/recording/");
+  const mbQuery = artist && title
+    ? `artist:"${artist}" AND recording:"${title}"`
+    : query;
+
+  target.searchParams.set("query", mbQuery);
+  target.searchParams.set("fmt", "json");
+  target.searchParams.set("limit", "5");
+
+  return requestJson(target).then((payload) => (
+    Array.isArray(payload.recordings) ? payload.recordings.map((item) => {
+      const release = Array.isArray(item.releases) ? item.releases[0] : null;
+      const artistCredit = Array.isArray(item["artist-credit"]) ? item["artist-credit"] : [];
+      return {
+        source: "MusicBrainz",
+        artist: artistCredit.map((credit) => credit.name).filter(Boolean).join(", "),
+        title: item.title || "",
+        album: release?.title || "",
+        url: item.id ? `https://musicbrainz.org/recording/${item.id}` : "",
+        releaseDate: item["first-release-date"] || release?.date || "",
+        score: item.score || 0,
+      };
+    }) : []
+  ));
+}
+
+function requestJson(target) {
+  return new Promise((resolve, reject) => {
+    requestText(target, (error, text) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(text));
+      } catch (parseError) {
+        reject(parseError);
+      }
     });
   });
 }
