@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ca">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Directori de radios en directe amb Radio Browser">
+    <title>Radio Atlas</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Radio Browser</p>
+        <h1>Radio Atlas</h1>
+      </div>
+      <div class="status-pill" id="apiStatus">Connectant</div>
+    </header>
+
+    <main class="app-shell">
+      <section class="toolbar" aria-label="Filtres de radio">
+        <label class="search-field">
+          <span>Cerca</span>
+          <input id="searchInput" type="search" placeholder="Nom, ciutat, estil..." autocomplete="off">
+        </label>
+
+        <label>
+          <span>Pais</span>
+          <select id="countrySelect">
+            <option value="">Tots</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Idioma</span>
+          <select id="languageSelect">
+            <option value="">Tots</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Codec</span>
+          <select id="codecSelect">
+            <option value="">Tots</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Ordre</span>
+          <select id="orderSelect">
+            <option value="clickcount">Populars</option>
+            <option value="votes">Vots</option>
+            <option value="name">Nom</option>
+            <option value="changetimestamp">Actualitzades</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="quick-row" aria-label="Accions rapides">
+        <button class="chip active" type="button" data-preset="all">Totes</button>
+        <button class="chip" type="button" data-preset="favorites">Favorites</button>
+        <!-- <button class="chip" type="button" data-preset="es">Espanya</button> -->
+        <button class="chip" type="button" data-preset="ca">Catala</button>
+        <button class="chip" type="button" data-preset="music">Musica</button>
+        <button class="chip" type="button" data-preset="news">Noticies</button>
+      </section>
+
+      <section class="results-head">
+        <div>
+          <h2 id="resultTitle">Emissores disponibles</h2>
+          <p id="resultMeta">Preparant resultats...</p>
+        </div>
+        <button class="ghost-button" type="button" id="refreshButton">Actualitza</button>
+      </section>
+
+      <section class="station-grid" id="stationGrid" aria-live="polite"></section>
+
+      <div class="load-row">
+        <button class="primary-button" type="button" id="loadMoreButton">Carrega mes</button>
+      </div>
+    </main>
+
+    <aside class="player" aria-label="Reproductor">
+      <div class="player-art" id="playerArt">RA</div>
+      <div class="player-info">
+        <p id="playerName">Cap emissora seleccionada</p>
+        <span id="playerMeta">Tria una radio per escoltar-la</span>
+      </div>
+      <audio id="audioPlayer" controls preload="none"></audio>
+    </aside>
+
+    <script src="app.js"></script>
+  </body>
+</html>
