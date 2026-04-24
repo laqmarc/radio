@@ -52,7 +52,7 @@ I obre:
 http://localhost:8000
 ```
 
-El servidor inclou un proxy de streams a `/stream`, necessari perque el navegador permeti analitzar l'audio amb Web Audio.
+El servidor inclou un proxy de streams a `/stream`, necessari perque el navegador permeti analitzar l'audio amb Web Audio. En produccio tambe s'usa el proxy del mateix domini, per exemple `https://radio.quexulo.cat/stream?...`.
 
 També pots obrir `index.html` directament al navegador, pero molts streams no permetran visualitzacio real per CORS.
 

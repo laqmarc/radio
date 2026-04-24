@@ -815,7 +815,7 @@ function drawWave(ctx, waveform, frequency, width, height) {
 }
 
 function drawSignalBadge(ctx, width, height, real) {
-  const text = real ? "audio real" : (canUseLocalProxy() ? "esperant senyal" : "obre amb npm start");
+  const text = real ? "audio real" : (canUseLocalProxy() ? "esperant senyal" : "proxy no disponible");
   const paddingX = 12;
   const badgeHeight = 28;
   ctx.font = "700 13px system-ui, sans-serif";
@@ -1088,8 +1088,7 @@ function getAudioPlaybackUrl(streamUrl) {
 }
 
 function canUseLocalProxy() {
-  return location.protocol === "http:"
-    && ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  return location.protocol === "http:" || location.protocol === "https:";
 }
 
 function saveRecentStation(station) {
