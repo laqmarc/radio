@@ -56,8 +56,11 @@ button {
 }
 
 h1,
-h2,
-p {
+h2 {
+  margin: 0;
+}
+
+:where(.app-header, .results-head, .station-card, .player, .station-modal, .tv-view) p {
   margin: 0;
 }
 
@@ -121,7 +124,7 @@ label {
   min-width: 0;
   color: var(--muted);
   font-size: 0.78rem;
-  font-weight: 750;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -205,7 +208,7 @@ select:focus {
   color: var(--ink);
   min-height: 40px;
   padding: 0 14px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .chip.active,
@@ -284,9 +287,10 @@ select:focus {
 .station-name {
   overflow: hidden;
   font-size: 1.02rem;
-  font-weight: 850;
+  font-weight: 800;
   line-height: 1.22;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
@@ -314,7 +318,7 @@ select:focus {
   color: #594b3a;
   padding: 5px 8px;
   font-size: 0.78rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .tag-button:hover,
@@ -341,7 +345,7 @@ select:focus {
   display: block;
   color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 750;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -439,7 +443,7 @@ select:focus {
 
 .player-info p {
   overflow: hidden;
-  font-weight: 850;
+  font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -460,9 +464,15 @@ select:focus {
   white-space: nowrap;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .player {
+    backdrop-filter: none;
+  }
+}
+
 .player-status {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  grid-template-columns: minmax(0, 1fr) 36px 42px 36px;
   gap: 8px;
   align-items: center;
 }
@@ -472,6 +482,7 @@ select:focus {
 }
 
 .visualizer-toggle,
+.equalizer-toggle,
 .tv-toggle {
   display: grid;
   place-items: center;
@@ -484,8 +495,17 @@ select:focus {
   padding: 0;
 }
 
+.equalizer-toggle {
+  width: 42px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
 .visualizer-toggle.active,
+.equalizer-toggle.active,
 .visualizer-toggle:hover,
+.equalizer-toggle:hover,
 .tv-toggle:hover {
   border-color: var(--accent);
   color: var(--accent-dark);
@@ -515,6 +535,8 @@ select:focus {
 .tv-icon {
   position: relative;
   display: block;
+
+.equalizer-panel,
   width: 22px;
   height: 15px;
   border: 2px solid currentColor;
@@ -523,9 +545,89 @@ select:focus {
 
 .tv-icon::before,
 .tv-icon::after {
+.equalizer-panel[hidden],
   content: "";
   position: absolute;
   background: currentColor;
+
+.equalizer-toolbar {
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 220px) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.equalizer-select-field,
+.equalizer-preamp-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.equalizer-select-field select,
+.equalizer-preamp-field input {
+  min-height: 34px;
+}
+
+.equalizer-preamp-field {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.equalizer-preamp-field span,
+.equalizer-preamp-field strong {
+  margin: 0;
+}
+
+.equalizer-preamp-field strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.equalizer-support-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.equalizer-grid {
+  display: grid;
+  grid-template-columns: repeat(15, minmax(34px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.equalizer-band {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.equalizer-gain,
+.equalizer-frequency {
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.equalizer-gain {
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+
+.equalizer-frequency {
+  color: var(--muted);
+}
+
+.equalizer-slider {
+  width: 132px;
+  height: 28px;
+  margin: 52px 0;
+  accent-color: var(--accent);
+  transform: rotate(-90deg);
+}
 }
 
 .tv-icon::before {
@@ -679,7 +781,7 @@ audio {
   border-radius: 6px;
   background: #fff;
   color: var(--ink);
-  font-weight: 850;
+  font-weight: 800;
 }
 
 .modal-header {
@@ -713,7 +815,7 @@ audio {
   margin-bottom: 4px;
   color: var(--accent-dark);
   font-size: 0.78rem;
-  font-weight: 850;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
@@ -744,7 +846,7 @@ audio {
   display: block;
   color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 750;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -1037,7 +1139,7 @@ audio {
     padding: 0 14px;
     color: var(--ink);
     cursor: pointer;
-    font-weight: 850;
+    font-weight: 800;
     list-style: none;
   }
 
@@ -1111,6 +1213,30 @@ audio {
     grid-column: 1 / -1;
   }
 
+  .equalizer-toolbar,
+  .equalizer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .equalizer-preamp-field {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .equalizer-band {
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    justify-items: stretch;
+    gap: 8px;
+  }
+
+  .equalizer-slider {
+    width: 100%;
+    height: 34px;
+    margin: 0;
+    transform: none;
+  }
+
   .player-info p {
     font-size: 0.92rem;
     line-height: 1.1;
@@ -1126,15 +1252,21 @@ audio {
   }
 
   .player-status {
-    grid-template-columns: minmax(0, 1fr) 32px 32px;
+    grid-template-columns: minmax(0, 1fr) 32px 40px 32px;
     gap: 6px;
   }
 
   .visualizer-toggle,
+  .equalizer-toggle,
   .tv-toggle {
     width: 32px;
     height: 32px;
     border-radius: 6px;
+  }
+
+  .equalizer-toggle {
+    width: 40px;
+    font-size: 0.68rem;
   }
 
   .song-finder-button {

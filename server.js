@@ -5,6 +5,8 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT) || 8000;
 const ROOT = __dirname;
+const UPSTREAM_CONNECT_TIMEOUT_MS = 12000;
+const UPSTREAM_IDLE_TIMEOUT_MS = 15000;
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -49,6 +51,11 @@ const server = http.createServer((req, res) => {
 
   if (requestUrl.pathname === "/song/search") {
     searchSong(requestUrl, res);
+    return;
+  }
+
+  if (requestUrl.pathname === "/healthz") {
+    sendJson(res, 200, { ok: true });
     return;
   }
 
@@ -127,6 +134,8 @@ function requestUpstream(target, clientReq, clientRes, redirectCount) {
   }
 
   const upstreamReq = transport.get(upstreamUrl, { headers }, (upstreamRes) => {
+    upstreamRes.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => upstreamRes.destroy(new Error("Stream idle timeout")));
+
     if ([301, 302, 303, 307, 308].includes(upstreamRes.statusCode) && upstreamRes.headers.location && redirectCount < 5) {
       upstreamRes.resume();
       const nextUrl = new URL(upstreamRes.headers.location, upstreamUrl).toString();
@@ -156,6 +165,8 @@ function requestUpstream(target, clientReq, clientRes, redirectCount) {
     clientRes.writeHead(upstreamRes.statusCode || 200, responseHeaders);
     upstreamRes.pipe(clientRes);
   });
+
+  upstreamReq.setTimeout(UPSTREAM_CONNECT_TIMEOUT_MS, () => upstreamReq.destroy(new Error("Stream connect timeout")));
 
   upstreamReq.on("error", () => {
     if (!clientRes.headersSent) {
@@ -197,6 +208,8 @@ function requestMetadataUpstream(target, clientReq, clientRes, redirectCount) {
       "Accept": "*/*",
     },
   }, (upstreamRes) => {
+    upstreamRes.setTimeout(UPSTREAM_IDLE_TIMEOUT_MS, () => upstreamRes.destroy(new Error("Metadata idle timeout")));
+
     if ([301, 302, 303, 307, 308].includes(upstreamRes.statusCode) && upstreamRes.headers.location && redirectCount < 5) {
       upstreamRes.resume();
       const nextUrl = new URL(upstreamRes.headers.location, upstreamUrl).toString();
@@ -216,6 +229,8 @@ function requestMetadataUpstream(target, clientReq, clientRes, redirectCount) {
       sendMetadataEvent(clientRes, { title, supported: true });
     });
   });
+
+  upstreamReq.setTimeout(UPSTREAM_CONNECT_TIMEOUT_MS, () => upstreamReq.destroy(new Error("Metadata connect timeout")));
 
   upstreamReq.on("error", () => {
     sendMetadataEvent(clientRes, { title: "", supported: false });
@@ -255,7 +270,7 @@ function parseIcyMetadata(stream, metaint, onTitle) {
       }
 
       const metadataBytes = Math.min(metadataLength - metadataBuffer.length, chunk.length - offset);
-      metadataBuffer = Buffer.concat([metadataBuffer, chunk.slice(offset, offset + metadataBytes)]);
+      metadataBuffer = Buffer.concat([metadataBuffer, chunk.subarray(offset, offset + metadataBytes)]);
       offset += metadataBytes;
 
       if (metadataBuffer.length === metadataLength) {
@@ -362,8 +377,9 @@ function searchItunes(query) {
 
 function searchMusicBrainz(query, artist, title) {
   const target = new URL("https://musicbrainz.org/ws/2/recording/");
+  const escapeMusicBrainzQuery = (value) => String(value).replace(/"/g, '\\"');
   const mbQuery = artist && title
-    ? `artist:"${artist}" AND recording:"${title}"`
+    ? `artist:"${escapeMusicBrainzQuery(artist)}" AND recording:"${escapeMusicBrainzQuery(title)}"`
     : query;
 
   target.searchParams.set("query", mbQuery);
@@ -457,7 +473,7 @@ function requestText(target, callback, redirectCount = 0) {
     upstreamRes.on("end", () => callback(null, chunks.join("")));
   });
 
-  req.setTimeout(12000, () => req.destroy(new Error("Timeout")));
+  req.setTimeout(UPSTREAM_CONNECT_TIMEOUT_MS, () => req.destroy(new Error("Timeout")));
   req.on("error", callback);
 }
 

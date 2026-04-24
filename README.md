@@ -24,6 +24,7 @@ Quan la font seleccionada es `Totes`, l'app barreja resultats de totes les fonts
 - Historial de recents amb `localStorage`.
 - Reproductor fix a la part inferior.
 - Reintent automatic amb un altre stream quan una emissora en te mes d'un.
+- Equalitzador de 15 bandes amb preamp, presets i bypass guardat a `localStorage`.
 - Visualitzador amb boto d'ull, pantalla completa i una ona reactiva.
 - Mode TV compartible amb logo, rellotge, visualitzador gran i URL propia.
 - Modal de detall amb dades de l'emissora, web oficial, stream i boto de compartir.
@@ -102,6 +103,9 @@ Aquest servidor fa aquestes feines importants:
 - `/song/search`
   Fa cerques gratuites a iTunes Search i MusicBrainz per enriquir el text de `Ara sona`.
 
+- `/healthz`
+  Endpoint minim per comprovar si el servidor local esta viu i si el frontend pot fer servir el proxy i les rutes auxiliars.
+
 - `/favicon.ico`
   Serveix el `favicon.svg` com a fallback per navegadors que demanen l'ICO classic.
 
@@ -142,6 +146,8 @@ CasterClub no s'usa directament des del frontend. El servidor consulta:
 - `https://yp.casterclub.com/station-detail.php?id=...`
 
 Despres transforma aquestes dades a un format intern compatible amb la resta de fonts.
+
+Important: la conversio de CasterClub es basa en regex sobre HTML extern. Això evita afegir dependencies pesades, pero fa que aquesta integracio sigui mes fragil que les fonts JSON. Si CasterClub canvia el markup, les rutes `/sources/casterclub` i `/sources/casterclub/station` poden deixar de retornar dades correctes fins que s'actualitzi el parser.
 
 ### Cataleg propi
 
@@ -221,6 +227,6 @@ Punts importants:
 
 - `FONTS-RADIO.md`: notes sobre com ampliar fonts de radio.
 
-## Cosese a afegir
+## Coses a afegir
 
-- Equalitzador per poder filtrar bé 
+- Perfils d'equalitzador per emissora o per font, si realment fa falta personalitzar mes.

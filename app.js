@@ -5,7 +5,35 @@ const CASTERCLUB_SOURCE_URL = "/sources/casterclub";
 const PAGE_SIZE = 50;
 const FAVORITES_KEY = "radio-atlas-favorites";
 const RECENTS_KEY = "radio-atlas-recents";
+const EQUALIZER_KEY = "radio-atlas-equalizer";
 const countryCodeCache = new Map();
+const EQUALIZER_BANDS = [
+  { frequency: 25, label: "25", type: "lowshelf", q: 0.7 },
+  { frequency: 40, label: "40", type: "peaking", q: 1.05 },
+  { frequency: 63, label: "63", type: "peaking", q: 1.05 },
+  { frequency: 100, label: "100", type: "peaking", q: 1.05 },
+  { frequency: 160, label: "160", type: "peaking", q: 1.05 },
+  { frequency: 250, label: "250", type: "peaking", q: 1.05 },
+  { frequency: 400, label: "400", type: "peaking", q: 1.05 },
+  { frequency: 630, label: "630", type: "peaking", q: 1.05 },
+  { frequency: 1000, label: "1k", type: "peaking", q: 1.05 },
+  { frequency: 1600, label: "1.6k", type: "peaking", q: 1.05 },
+  { frequency: 2500, label: "2.5k", type: "peaking", q: 1.05 },
+  { frequency: 4000, label: "4k", type: "peaking", q: 1.05 },
+  { frequency: 6300, label: "6.3k", type: "peaking", q: 1.05 },
+  { frequency: 10000, label: "10k", type: "peaking", q: 1.05 },
+  { frequency: 16000, label: "16k", type: "highshelf", q: 0.7 },
+];
+const EQUALIZER_PRESETS = {
+  flat: { label: "Pla", preamp: 0, bands: Array(EQUALIZER_BANDS.length).fill(0) },
+  voice: { label: "Veu", preamp: -1.5, bands: [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 3, 2, 1, 0, -1] },
+  warm: { label: "Calid", preamp: -1, bands: [3, 2.5, 2, 1.5, 1, 0.5, 0, -0.5, -1, -1, -0.5, 0.5, 1, 1.5, 2] },
+  bright: { label: "Brillant", preamp: -1.5, bands: [-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 3, 2, 1] },
+  night: { label: "Nit", preamp: -2, bands: [1.5, 1.5, 1, 0.5, 0, -0.5, -1, -1.5, -2, -2.5, -3, -3.5, -4, -4.5, -5] },
+};
+const equalizerSettings = readEqualizerSettings();
+let countryCodeLookup = null;
+let currentFetchController = null;
 
 const state = {
   stations: [],
@@ -25,6 +53,14 @@ const state = {
   visualizerFrame: null,
   visualizerSource: null,
   audioContext: null,
+  audioGraphReady: false,
+  equalizerOpen: false,
+  equalizerEnabled: equalizerSettings.enabled,
+  equalizerPreset: equalizerSettings.preset,
+  equalizerPreamp: equalizerSettings.preamp,
+  equalizerBands: [...equalizerSettings.bands],
+  equalizerPreampNode: null,
+  equalizerFilters: [],
   analyser: null,
   frequencyData: null,
   waveformData: null,
@@ -34,6 +70,8 @@ const state = {
   metadataSource: null,
   nowPlaying: "",
   songLookupCache: new Map(),
+  loadRequestId: 0,
+  localProxyAvailable: false,
 };
 
 const els = {
@@ -60,10 +98,19 @@ const els = {
   nowPlaying: document.querySelector("#nowPlaying"),
   playerArt: document.querySelector("#playerArt"),
   visualizerToggle: document.querySelector("#visualizerToggle"),
+  equalizerToggle: document.querySelector("#equalizerToggle"),
   tvToggle: document.querySelector("#tvToggle"),
   visualizerPanel: document.querySelector("#visualizerPanel"),
   visualizerCanvas: document.querySelector("#visualizerCanvas"),
   fullscreenVisualizerButton: document.querySelector("#fullscreenVisualizerButton"),
+  equalizerPanel: document.querySelector("#equalizerPanel"),
+  equalizerGrid: document.querySelector("#equalizerGrid"),
+  equalizerBypassButton: document.querySelector("#equalizerBypassButton"),
+  equalizerResetButton: document.querySelector("#equalizerResetButton"),
+  equalizerPresetSelect: document.querySelector("#equalizerPresetSelect"),
+  equalizerPreampInput: document.querySelector("#equalizerPreampInput"),
+  equalizerPreampValue: document.querySelector("#equalizerPreampValue"),
+  equalizerSupportNote: document.querySelector("#equalizerSupportNote"),
   tvView: document.querySelector("#tvView"),
   tvStationName: document.querySelector("#tvStationName"),
   tvStationMeta: document.querySelector("#tvStationMeta"),
@@ -85,8 +132,11 @@ const debounce = (fn, wait = 350) => {
 init();
 
 async function init() {
+  renderEqualizerBands();
   bindEvents();
   syncFilterDisclosure();
+  await probeLocalProxy();
+  syncEqualizerUi();
   await Promise.all([loadFilterOptions(), loadStations(true)]);
   await handleInitialRoute();
 }
@@ -108,9 +158,15 @@ function bindEvents() {
   els.randomButton.addEventListener("click", playRandomStation);
   els.loadMoreButton.addEventListener("click", () => loadStations(false));
   els.visualizerToggle.addEventListener("click", toggleVisualizer);
+  els.equalizerToggle.addEventListener("click", toggleEqualizerPanel);
   els.tvToggle.addEventListener("click", openCurrentStationInTvMode);
   els.songFinderButton.addEventListener("click", openSongFinder);
   els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
+  els.equalizerBypassButton.addEventListener("click", toggleEqualizerEnabled);
+  els.equalizerResetButton.addEventListener("click", resetEqualizer);
+  els.equalizerPresetSelect.addEventListener("change", (event) => applyEqualizerPreset(event.target.value));
+  els.equalizerPreampInput.addEventListener("input", (event) => setEqualizerPreamp(event.target.value));
+  els.equalizerGrid.addEventListener("input", handleEqualizerBandInput);
   els.exitTvButton.addEventListener("click", exitTvMode);
   document.addEventListener("fullscreenchange", resizeVisualizerCanvas);
   window.addEventListener("resize", resizeVisualizerCanvas);
@@ -119,6 +175,9 @@ function bindEvents() {
   els.audioPlayer.addEventListener("loadstart", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("waiting", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("playing", () => {
+    if (state.equalizerEnabled || state.visualizerOpen || !els.tvView.hidden) {
+      ensureAudioGraph();
+    }
     setStatus("Reproduint", "ok");
     updatePlayerStatus("Reproduint");
   });
@@ -163,7 +222,14 @@ async function loadFilterOptions() {
 }
 
 async function loadStations(reset) {
-  if (state.loading) return;
+  if (currentFetchController) {
+    currentFetchController.abort();
+  }
+
+  const controller = new AbortController();
+  const requestId = state.loadRequestId + 1;
+  currentFetchController = controller;
+  state.loadRequestId = requestId;
 
   if (reset) {
     state.offset = 0;
@@ -185,7 +251,11 @@ async function loadStations(reset) {
   renderLoading(reset);
 
   try {
-    const items = await loadStationsForSelectedSource();
+    const items = await loadStationsForSelectedSource(controller.signal);
+
+    if (controller.signal.aborted || requestId !== state.loadRequestId) {
+      return;
+    }
 
     const nextStations = reset ? items : state.stations.concat(items);
     state.stations = dedupeStations(nextStations);
@@ -194,40 +264,47 @@ async function loadStations(reset) {
     renderStations();
     setStatus("APIs connectades", "ok");
   } catch (error) {
+    if (error.name === "AbortError") {
+      return;
+    }
+
     console.error(error);
     setStatus("Error de connexio", "error");
     renderError();
   } finally {
-    state.loading = false;
+    if (currentFetchController === controller) {
+      currentFetchController = null;
+      state.loading = false;
+    }
   }
 }
 
-async function loadStationsForSelectedSource() {
+async function loadStationsForSelectedSource(signal) {
   if (els.sourceSelect.value === "radio-browser") {
-    return loadRadioBrowserStations();
+    return loadRadioBrowserStations(signal);
   }
 
   if (els.sourceSelect.value === "iprd") {
-    return loadIprdStations();
+    return loadIprdStations(signal);
   }
 
   if (els.sourceSelect.value === "custom") {
-    return loadCustomStations();
+    return loadCustomStations(signal);
   }
 
   if (els.sourceSelect.value === "casterclub") {
-    return loadCasterClubStations();
+    return loadCasterClubStations(signal);
   }
 
-  return loadAllSourcesStations();
+  return loadAllSourcesStations(signal);
 }
 
-async function loadAllSourcesStations() {
+async function loadAllSourcesStations(signal) {
   const results = await Promise.allSettled([
-    loadCustomStations(),
-    loadRadioBrowserStations(),
-    loadIprdStations(),
-    loadCasterClubStations(),
+    loadCustomStations(signal),
+    loadRadioBrowserStations(signal),
+    loadIprdStations(signal),
+    loadCasterClubStations(signal),
   ]);
   const [customStations, radioBrowserStations, iprdStations, casterClubStations] = results.map((result) => (
     result.status === "fulfilled" ? result.value : []
@@ -240,14 +317,14 @@ async function loadAllSourcesStations() {
   return dedupeStations(interleaveStations(customStations, radioBrowserStations, iprdStations, casterClubStations)).slice(0, PAGE_SIZE);
 }
 
-async function loadRadioBrowserStations() {
+async function loadRadioBrowserStations(signal) {
   const params = buildRadioBrowserParams();
-  const items = await getJson(`/json/stations/search?${params.toString()}`);
+  const items = await getJson(`/json/stations/search?${params.toString()}`, { signal });
   return items.map(normalizeRadioBrowserStation).filter(matchesQualityFilters);
 }
 
-async function loadIprdStations() {
-  const catalog = await getIprdCatalog();
+async function loadIprdStations(signal) {
+  const catalog = await getIprdCatalog(signal);
   const filtered = catalog
     .filter(matchesIprdFilters)
     .sort(sortIprdStations);
@@ -258,8 +335,8 @@ async function loadIprdStations() {
     .filter(matchesQualityFilters);
 }
 
-async function loadCustomStations() {
-  const catalog = await getCustomCatalog();
+async function loadCustomStations(signal) {
+  const catalog = await getCustomCatalog(signal);
   const filtered = catalog
     .filter(matchesCustomFilters)
     .sort(sortCustomStations);
@@ -270,11 +347,11 @@ async function loadCustomStations() {
     .filter(matchesQualityFilters);
 }
 
-async function loadCasterClubStations() {
+async function loadCasterClubStations(signal) {
   const firstPage = Math.floor(state.offset / PAGE_SIZE) * 2 + 1;
   const pages = await Promise.all([
-    fetchCasterClubPage(firstPage),
-    fetchCasterClubPage(firstPage + 1),
+    fetchCasterClubPage(firstPage, signal),
+    fetchCasterClubPage(firstPage + 1, signal),
   ]);
   return pages
     .flat()
@@ -284,7 +361,7 @@ async function loadCasterClubStations() {
     .slice(0, PAGE_SIZE);
 }
 
-async function fetchCasterClubPage(page) {
+async function fetchCasterClubPage(page, signal) {
   const params = new URLSearchParams({
     page,
     order: els.orderSelect.value,
@@ -298,6 +375,7 @@ async function fetchCasterClubPage(page) {
     headers: {
       "Accept": "application/json",
     },
+    signal,
   });
 
   if (!response.ok) {
@@ -395,11 +473,12 @@ function buildRadioBrowserParams() {
   return params;
 }
 
-async function getJson(path) {
+async function getJson(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Accept": "application/json",
     },
+    signal: options.signal,
   });
 
   if (!response.ok) {
@@ -409,7 +488,7 @@ async function getJson(path) {
   return response.json();
 }
 
-async function getIprdCatalog() {
+async function getIprdCatalog(signal) {
   if (state.iprdStations) {
     return state.iprdStations;
   }
@@ -418,6 +497,7 @@ async function getIprdCatalog() {
     headers: {
       "Accept": "application/json",
     },
+    signal,
   });
 
   if (!response.ok) {
@@ -429,7 +509,7 @@ async function getIprdCatalog() {
   return state.iprdStations;
 }
 
-async function getCustomCatalog() {
+async function getCustomCatalog(signal) {
   if (state.customStations) {
     return state.customStations;
   }
@@ -439,6 +519,7 @@ async function getCustomCatalog() {
     headers: {
       "Accept": "application/json",
     },
+    signal,
   });
 
   if (!response.ok) {
@@ -676,7 +757,6 @@ function normalizeCasterClubStation(station) {
 
 function matchesCasterClubClientFilters(station) {
   if (els.countrySelect.value && getCountryCode(station.country) !== els.countrySelect.value) return false;
-  if (els.languageSelect.value) return false;
 
   if (state.preset === "ca") {
     const searchable = [station.name, station.country, station.tagsList?.join(" ")]
@@ -723,20 +803,36 @@ function getCountryCode(countryName) {
     return countryCodeCache.get(cacheKey);
   }
 
+  const countryCode = getCountryCodeLookup().get(cacheKey) || "";
+  countryCodeCache.set(cacheKey, countryCode);
+  return countryCode;
+
+}
+
+function getCountryCodeLookup() {
+  if (countryCodeLookup) {
+    return countryCodeLookup;
+  }
+
   const displayNames = new Intl.DisplayNames(["en"], { type: "region" });
+  countryCodeLookup = new Map();
 
   for (let first = 65; first <= 90; first += 1) {
     for (let second = 65; second <= 90; second += 1) {
       const countryCode = String.fromCharCode(first, second);
-      if (displayNames.of(countryCode)?.toLowerCase() === String(countryName).toLowerCase()) {
-        countryCodeCache.set(cacheKey, countryCode);
-        return countryCode;
+
+      try {
+        const displayName = displayNames.of(countryCode);
+        if (displayName) {
+          countryCodeLookup.set(displayName.toLowerCase(), countryCode);
+        }
+      } catch {
+        // Ignore invalid region codes returned by Intl.DisplayNames.
       }
     }
   }
 
-  countryCodeCache.set(cacheKey, "");
-  return "";
+  return countryCodeLookup;
 }
 
 function applyPreset(preset) {
@@ -785,7 +881,7 @@ function toggleVisualizer() {
 
 function startVisualizer() {
   stopVisualizer();
-  setupVisualizerProbe();
+  ensureAudioGraph();
   resizeVisualizerCanvas();
   drawVisualizer();
 }
@@ -821,10 +917,10 @@ function stopVisualizer() {
   }
 }
 
-function setupVisualizerProbe() {
+function ensureAudioGraph() {
   const streamUrl = els.audioPlayer.currentSrc || els.audioPlayer.src;
   if (!streamUrl || !canUseLocalProxy() || !window.AudioContext && !window.webkitAudioContext) {
-    return;
+    return false;
   }
 
   try {
@@ -835,23 +931,252 @@ function setupVisualizerProbe() {
       state.visualizerSource = state.audioContext.createMediaElementSource(els.audioPlayer);
     }
 
+    if (!state.equalizerPreampNode) {
+      state.equalizerPreampNode = state.audioContext.createGain();
+    }
+
+    if (!state.equalizerFilters.length) {
+      state.equalizerFilters = EQUALIZER_BANDS.map((band, index) => {
+        const filter = state.audioContext.createBiquadFilter();
+        filter.type = band.type;
+        filter.frequency.value = band.frequency;
+        filter.Q.value = band.q;
+        filter.gain.value = state.equalizerBands[index] || 0;
+        return filter;
+      });
+    }
+
     if (!state.analyser) {
       state.analyser = state.audioContext.createAnalyser();
       state.analyser.fftSize = 1024;
       state.analyser.smoothingTimeConstant = 0.74;
       state.frequencyData = new Uint8Array(state.analyser.frequencyBinCount);
       state.waveformData = new Uint8Array(state.analyser.fftSize);
-      state.visualizerSource.connect(state.analyser);
-      state.analyser.connect(state.audioContext.destination);
     }
 
+    applyEqualizerSettingsToNodes();
+    reconnectAudioGraph();
     state.audioContext.resume().catch(() => {});
+    return true;
   } catch (error) {
     console.warn("Visualitzador real no disponible; usant mode animat", error);
+    state.audioGraphReady = false;
     state.analyser = null;
     state.frequencyData = null;
     state.waveformData = null;
+    return false;
   }
+}
+
+function reconnectAudioGraph() {
+  if (!state.visualizerSource || !state.analyser || !state.audioContext) {
+    return;
+  }
+
+  disconnectAudioGraph();
+
+  if (state.equalizerEnabled && state.equalizerPreampNode && state.equalizerFilters.length) {
+    state.visualizerSource.connect(state.equalizerPreampNode);
+
+    let currentNode = state.equalizerPreampNode;
+    state.equalizerFilters.forEach((filter) => {
+      currentNode.connect(filter);
+      currentNode = filter;
+    });
+
+    currentNode.connect(state.analyser);
+  } else {
+    state.visualizerSource.connect(state.analyser);
+  }
+
+  state.analyser.connect(state.audioContext.destination);
+  state.audioGraphReady = true;
+}
+
+function disconnectAudioGraph() {
+  [
+    state.visualizerSource,
+    state.equalizerPreampNode,
+    ...state.equalizerFilters,
+    state.analyser,
+  ].forEach((node) => {
+    if (!node) return;
+
+    try {
+      node.disconnect();
+    } catch {
+      // Ignore disconnect errors from nodes that are not currently connected.
+    }
+  });
+}
+
+function applyEqualizerSettingsToNodes() {
+  if (state.equalizerPreampNode) {
+    state.equalizerPreampNode.gain.value = decibelsToGain(state.equalizerPreamp);
+  }
+
+  state.equalizerFilters.forEach((filter, index) => {
+    filter.gain.value = state.equalizerBands[index] || 0;
+  });
+}
+
+function decibelsToGain(value) {
+  return 10 ** (Number(value) / 20);
+}
+
+function renderEqualizerBands() {
+  if (!els.equalizerGrid) return;
+
+  els.equalizerGrid.innerHTML = EQUALIZER_BANDS.map((band, index) => `
+    <label class="equalizer-band" aria-label="Banda ${band.label} Hz">
+      <span class="equalizer-gain" data-band-gain="${index}">${formatEqualizerGain(state.equalizerBands[index])}</span>
+      <input
+        class="equalizer-slider"
+        data-band-index="${index}"
+        type="range"
+        min="-12"
+        max="12"
+        step="0.5"
+        value="${state.equalizerBands[index]}"
+      >
+      <span class="equalizer-frequency">${band.label}</span>
+    </label>
+  `).join("");
+}
+
+function toggleEqualizerPanel() {
+  state.equalizerOpen = !state.equalizerOpen;
+  if (state.equalizerOpen && state.equalizerEnabled) {
+    ensureAudioGraph();
+  }
+  syncEqualizerUi();
+}
+
+function toggleEqualizerEnabled() {
+  state.equalizerEnabled = !state.equalizerEnabled;
+
+  if (state.equalizerEnabled) {
+    ensureAudioGraph();
+  } else if (state.audioGraphReady) {
+    reconnectAudioGraph();
+  }
+
+  writeEqualizerSettings();
+  syncEqualizerUi();
+}
+
+function handleEqualizerBandInput(event) {
+  const slider = event.target.closest("[data-band-index]");
+  if (!slider) return;
+
+  const index = Number(slider.dataset.bandIndex);
+  setEqualizerBand(index, slider.value);
+}
+
+function setEqualizerBand(index, value) {
+  if (!Number.isInteger(index) || index < 0 || index >= state.equalizerBands.length) {
+    return;
+  }
+
+  state.equalizerBands[index] = clampEqualizerValue(value);
+  state.equalizerEnabled = true;
+  state.equalizerPreset = "custom";
+  applyEqualizerSettingsToNodes();
+
+  if (state.audioGraphReady) {
+    reconnectAudioGraph();
+  } else {
+    ensureAudioGraph();
+  }
+
+  writeEqualizerSettings();
+  syncEqualizerUi();
+}
+
+function setEqualizerPreamp(value) {
+  state.equalizerPreamp = clampEqualizerValue(value);
+  state.equalizerEnabled = true;
+  state.equalizerPreset = "custom";
+  applyEqualizerSettingsToNodes();
+
+  if (state.audioGraphReady) {
+    reconnectAudioGraph();
+  } else {
+    ensureAudioGraph();
+  }
+
+  writeEqualizerSettings();
+  syncEqualizerUi();
+}
+
+function applyEqualizerPreset(preset) {
+  const presetConfig = EQUALIZER_PRESETS[preset];
+  if (!presetConfig) {
+    state.equalizerPreset = "custom";
+    syncEqualizerUi();
+    return;
+  }
+
+  state.equalizerPreset = preset;
+  state.equalizerEnabled = true;
+  state.equalizerPreamp = presetConfig.preamp;
+  state.equalizerBands = [...presetConfig.bands];
+  applyEqualizerSettingsToNodes();
+
+  if (state.audioGraphReady) {
+    reconnectAudioGraph();
+  } else {
+    ensureAudioGraph();
+  }
+
+  writeEqualizerSettings();
+  syncEqualizerUi();
+}
+
+function resetEqualizer() {
+  applyEqualizerPreset("flat");
+}
+
+function syncEqualizerUi() {
+  if (!els.equalizerPanel) return;
+
+  const supported = canUseLocalProxy() && Boolean(window.AudioContext || window.webkitAudioContext);
+
+  els.equalizerPanel.hidden = !state.equalizerOpen;
+  els.equalizerToggle.classList.toggle("active", state.equalizerOpen);
+  els.equalizerToggle.setAttribute("aria-label", state.equalizerOpen ? "Amaga equalitzador" : "Mostra equalitzador");
+  els.equalizerBypassButton.classList.toggle("active", state.equalizerEnabled);
+  els.equalizerBypassButton.textContent = state.equalizerEnabled ? "EQ actiu" : "EQ en bypass";
+  els.equalizerPreampInput.value = String(state.equalizerPreamp);
+  els.equalizerPreampValue.textContent = formatEqualizerGain(state.equalizerPreamp);
+  els.equalizerPresetSelect.value = state.equalizerPreset in EQUALIZER_PRESETS ? state.equalizerPreset : "custom";
+  els.equalizerSupportNote.textContent = supported
+    ? (state.equalizerEnabled ? "L'EQ actua sobre el so que surt del player." : "Activa'l per processar el so amb 15 bandes i preamp.")
+    : "L'equalitzador necessita reproduccio servida per server.js i un navegador amb Web Audio.";
+
+  els.equalizerPanel.querySelectorAll("[data-band-index]").forEach((slider) => {
+    const index = Number(slider.dataset.bandIndex);
+    slider.value = String(state.equalizerBands[index]);
+    slider.disabled = !supported;
+  });
+
+  els.equalizerPanel.querySelectorAll("[data-band-gain]").forEach((output) => {
+    const index = Number(output.dataset.bandGain);
+    output.textContent = formatEqualizerGain(state.equalizerBands[index]);
+  });
+
+  [els.equalizerBypassButton, els.equalizerResetButton, els.equalizerPresetSelect, els.equalizerPreampInput].forEach((control) => {
+    control.disabled = !supported;
+  });
+}
+
+function formatEqualizerGain(value) {
+  const gain = Number(value) || 0;
+  return `${gain > 0 ? "+" : ""}${gain.toFixed(1)} dB`;
+}
+
+function clampEqualizerValue(value) {
+  return Math.max(-12, Math.min(12, Number(value) || 0));
 }
 
 function drawVisualizer() {
@@ -1182,7 +1507,7 @@ function renderStationCard(station) {
   const initials = getInitials(station.name);
   const saved = state.favorites.has(station.stationuuid);
   const logo = station.favicon
-    ? `<img src="${escapeAttribute(station.favicon)}" alt="" loading="lazy" onerror="this.remove()">`
+    ? `<img src="${escapeAttribute(station.favicon)}" alt="" loading="lazy" data-remove-broken-image="true">`
     : initials;
 
   return `
@@ -1207,6 +1532,8 @@ function renderStationCard(station) {
 }
 
 function bindStationButtons() {
+  bindBrokenImageFallbacks(els.stationGrid);
+
   els.stationGrid.querySelectorAll("[data-play]").forEach((button) => {
     button.addEventListener("click", () => {
       const station = findStation(button.dataset.play);
@@ -1259,6 +1586,11 @@ async function handleInitialRoute() {
 
   const existing = findStationByRoute(route.source, route.id);
   if (existing) {
+    if (existing.stationuuid === state.currentStation?.stationuuid) {
+      if (isTvRoute()) enterTvMode(existing);
+      return;
+    }
+
     if (isTvRoute()) enterTvMode(existing);
     playStation(existing, 0, { updateRoute: false });
     return;
@@ -1477,7 +1809,7 @@ function showStationDetails(station) {
     <section class="station-modal" role="dialog" aria-modal="true" aria-label="Detall de l'emissora">
       <button class="modal-close" type="button" data-close-modal aria-label="Tanca">x</button>
       <div class="modal-header">
-        <div class="modal-logo">${station.favicon ? `<img src="${escapeAttribute(station.favicon)}" alt="" onerror="this.remove()">` : escapeHtml(getInitials(station.name))}</div>
+        <div class="modal-logo">${station.favicon ? `<img src="${escapeAttribute(station.favicon)}" alt="" data-remove-broken-image="true">` : escapeHtml(getInitials(station.name))}</div>
         <div>
           <p class="modal-source">${escapeHtml(station.source || "Font desconeguda")}</p>
           <h2>${escapeHtml(station.name || "Radio sense nom")}</h2>
@@ -1526,6 +1858,7 @@ function showStationDetails(station) {
     }
   });
 
+  bindBrokenImageFallbacks(dialog);
   document.addEventListener("keydown", handleModalKeydown);
   document.body.append(dialog);
   dialog.querySelector("[data-close-modal]").focus();
@@ -1795,6 +2128,8 @@ function playStation(station, streamIndex = 0, options = {}) {
   els.audioPlayer.src = getAudioPlaybackUrl(streamUrl);
   if (state.visualizerOpen) {
     startVisualizer();
+  } else if (state.equalizerEnabled) {
+    ensureAudioGraph();
   }
   els.audioPlayer.play().catch(() => {
     setStatus("El navegador ha bloquejat la reproduccio", "error");
@@ -1873,13 +2208,44 @@ function clearNowPlaying() {
 }
 
 function canUseLocalProxy() {
-  return location.protocol === "http:" || location.protocol === "https:";
+  return state.localProxyAvailable;
 }
 
 function saveRecentStation(station) {
   state.recents.delete(station.stationuuid);
-  state.recents = new Map([[station.stationuuid, station], ...state.recents].slice(0, 20));
+  const entries = [[station.stationuuid, station], ...state.recents.entries()].slice(0, 20);
+  state.recents = new Map(entries);
   writeRecents();
+}
+
+function bindBrokenImageFallbacks(root) {
+  root.querySelectorAll("img[data-remove-broken-image]").forEach((image) => {
+    image.addEventListener("error", () => image.remove(), { once: true });
+  });
+}
+
+async function probeLocalProxy() {
+  if (location.protocol !== "http:" && location.protocol !== "https:") {
+    state.localProxyAvailable = false;
+    syncEqualizerUi();
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 1500);
+
+  try {
+    const response = await fetch("/healthz", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    state.localProxyAvailable = response.ok;
+  } catch {
+    state.localProxyAvailable = false;
+  } finally {
+    window.clearTimeout(timeoutId);
+    syncEqualizerUi();
+  }
 }
 
 function handlePlaybackError() {
@@ -1960,6 +2326,38 @@ function readRecents() {
 
 function writeRecents() {
   localStorage.setItem(RECENTS_KEY, JSON.stringify([...state.recents.values()]));
+}
+
+function readEqualizerSettings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EQUALIZER_KEY) || "{}");
+    const preset = parsed.preset in EQUALIZER_PRESETS ? parsed.preset : "flat";
+    const presetConfig = EQUALIZER_PRESETS[preset] || EQUALIZER_PRESETS.flat;
+    const parsedBands = Array.isArray(parsed.bands) ? parsed.bands : presetConfig.bands;
+
+    return {
+      enabled: Boolean(parsed.enabled),
+      preset,
+      preamp: clampEqualizerValue(parsed.preamp ?? presetConfig.preamp),
+      bands: EQUALIZER_BANDS.map((_, index) => clampEqualizerValue(parsedBands[index] ?? presetConfig.bands[index] ?? 0)),
+    };
+  } catch {
+    return {
+      enabled: false,
+      preset: "flat",
+      preamp: 0,
+      bands: Array(EQUALIZER_BANDS.length).fill(0),
+    };
+  }
+}
+
+function writeEqualizerSettings() {
+  localStorage.setItem(EQUALIZER_KEY, JSON.stringify({
+    enabled: state.equalizerEnabled,
+    preset: state.equalizerPreset,
+    preamp: state.equalizerPreamp,
+    bands: state.equalizerBands,
+  }));
 }
 
 function getInitials(name = "") {
