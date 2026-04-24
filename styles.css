@@ -245,6 +245,7 @@ select:focus {
 }
 
 .station-card {
+  position: relative;
   display: grid;
   gap: 14px;
   min-height: 238px;
@@ -433,6 +434,12 @@ select:focus {
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.now-playing {
+  margin-top: 2px;
+  color: var(--accent-dark);
+  font-size: 0.84rem;
 }
 
 .player-info span {
@@ -791,7 +798,7 @@ audio {
 
 .tv-header h2 {
   margin-top: 4px;
-  font-size: clamp(2.5rem, 6vw, 7rem);
+  font-size: 1rem;
   line-height: 0.95;
   overflow-wrap: anywhere;
 }
@@ -944,30 +951,71 @@ audio {
     left: 10px;
     right: 10px;
     bottom: 10px;
-    grid-template-columns: 58px minmax(0, 1fr);
-    align-items: center;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px 10px;
+    align-items: start;
+    padding: 8px;
   }
 
   .player-art {
     grid-column: 1;
-    grid-row: 1 / span 2;
-  }
-
-  .player-info,
-  .player audio {
-    grid-column: 2;
+    grid-row: 1;
+    width: 42px;
+    height: 42px;
+    border-radius: 7px;
+    font-size: 0.85rem;
   }
 
   .player-info {
+    grid-column: 2;
     grid-row: 1;
+    align-self: center;
   }
 
   .player audio {
+    grid-column: 1 / -1;
     grid-row: 2;
+    height: 34px;
   }
 
   .visualizer-panel {
     grid-column: 1 / -1;
+  }
+
+  .player-info p {
+    font-size: 0.92rem;
+    line-height: 1.1;
+  }
+
+  .player-info .now-playing {
+    font-size: 0.72rem;
+  }
+
+  .player-info span {
+    margin-top: 2px;
+    font-size: 0.74rem;
+  }
+
+  .player-status {
+    grid-template-columns: minmax(0, 1fr) 32px 32px;
+    gap: 6px;
+  }
+
+  .visualizer-toggle,
+  .tv-toggle {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+  }
+
+  .eye-icon {
+    width: 19px;
+    height: 12px;
+  }
+
+  .tv-icon {
+    width: 20px;
+    height: 14px;
   }
 
   .station-card {

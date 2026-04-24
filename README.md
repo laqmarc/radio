@@ -21,6 +21,7 @@ Web estatica per explorar emissores de radio de [Radio Browser](https://www.radi
 - Boto `Aleatoria` per reproduir una emissora dels resultats carregats.
 - Enllacos compartibles d'emissora amb format `#/station/{font}/{id}` i boto `Comparteix` al modal.
 - Mode pantalla gran amb format `?view=tv#/station/{font}/{id}`, logo, hora i visualitzador gran.
+- Metadades ICY opcionals per mostrar `Ara sona` quan l'emissora publica titol de canco o programa.
 - Paginacio amb boto `Carrega mes`.
 - Filtre `hidebroken=true` per evitar emissores marcades com trencades.
 
@@ -55,6 +56,7 @@ http://localhost:8000
 ```
 
 El servidor inclou un proxy de streams a `/stream`, necessari perque el navegador permeti analitzar l'audio amb Web Audio. En produccio tambe s'usa el proxy del mateix domini, per exemple `https://radio.quexulo.cat/stream?...`.
+També inclou `/metadata`, que llegeix metadades ICY (`StreamTitle`) quan el stream les publica.
 
 També pots obrir `index.html` directament al navegador, pero molts streams no permetran visualitzacio real per CORS.
 

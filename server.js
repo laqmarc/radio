@@ -30,6 +30,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (requestUrl.pathname === "/metadata") {
+    streamMetadata(requestUrl, req, res);
+    return;
+  }
+
   serveStatic(requestUrl, res);
 });
 
@@ -67,7 +72,10 @@ function serveStatic(requestUrl, res) {
     const contentType = MIME_TYPES[path.extname(filePath)] || "application/octet-stream";
     res.writeHead(200, {
       "Content-Type": contentType,
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "Surrogate-Control": "no-store",
     });
     res.end(content);
   });
@@ -136,4 +144,120 @@ function requestUpstream(target, clientReq, clientRes, redirectCount) {
   });
 
   clientReq.on("close", () => upstreamReq.destroy());
+}
+
+function streamMetadata(requestUrl, clientReq, clientRes) {
+  const target = requestUrl.searchParams.get("url");
+
+  if (!target || !/^https?:\/\//i.test(target)) {
+    clientRes.writeHead(400);
+    clientRes.end("Missing stream url");
+    return;
+  }
+
+  clientRes.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  });
+  clientRes.write("retry: 5000\n\n");
+
+  requestMetadataUpstream(target, clientReq, clientRes, 0);
+}
+
+function requestMetadataUpstream(target, clientReq, clientRes, redirectCount) {
+  const upstreamUrl = new URL(target);
+  const transport = upstreamUrl.protocol === "https:" ? https : http;
+  const upstreamReq = transport.get(upstreamUrl, {
+    headers: {
+      "User-Agent": "RadioQuexulo/1.0",
+      "Icy-MetaData": "1",
+      "Accept": "*/*",
+    },
+  }, (upstreamRes) => {
+    if ([301, 302, 303, 307, 308].includes(upstreamRes.statusCode) && upstreamRes.headers.location && redirectCount < 5) {
+      upstreamRes.resume();
+      const nextUrl = new URL(upstreamRes.headers.location, upstreamUrl).toString();
+      requestMetadataUpstream(nextUrl, clientReq, clientRes, redirectCount + 1);
+      return;
+    }
+
+    const metaint = Number(upstreamRes.headers["icy-metaint"]);
+    if (!metaint) {
+      sendMetadataEvent(clientRes, { title: "", supported: false });
+      upstreamRes.destroy();
+      clientRes.end();
+      return;
+    }
+
+    parseIcyMetadata(upstreamRes, metaint, (title) => {
+      sendMetadataEvent(clientRes, { title, supported: true });
+    });
+  });
+
+  upstreamReq.on("error", () => {
+    sendMetadataEvent(clientRes, { title: "", supported: false });
+    clientRes.end();
+  });
+
+  clientReq.on("close", () => upstreamReq.destroy());
+}
+
+function parseIcyMetadata(stream, metaint, onTitle) {
+  let audioBytesUntilMeta = metaint;
+  let metadataLength = null;
+  let metadataBuffer = Buffer.alloc(0);
+  let lastTitle = "";
+
+  stream.on("data", (chunk) => {
+    let offset = 0;
+
+    while (offset < chunk.length) {
+      if (audioBytesUntilMeta > 0) {
+        const audioBytes = Math.min(audioBytesUntilMeta, chunk.length - offset);
+        audioBytesUntilMeta -= audioBytes;
+        offset += audioBytes;
+        continue;
+      }
+
+      if (metadataLength === null) {
+        metadataLength = chunk[offset] * 16;
+        metadataBuffer = Buffer.alloc(0);
+        offset += 1;
+
+        if (metadataLength === 0) {
+          metadataLength = null;
+          audioBytesUntilMeta = metaint;
+        }
+        continue;
+      }
+
+      const metadataBytes = Math.min(metadataLength - metadataBuffer.length, chunk.length - offset);
+      metadataBuffer = Buffer.concat([metadataBuffer, chunk.slice(offset, offset + metadataBytes)]);
+      offset += metadataBytes;
+
+      if (metadataBuffer.length === metadataLength) {
+        const title = extractStreamTitle(metadataBuffer.toString("utf8"));
+        if (title && title !== lastTitle) {
+          lastTitle = title;
+          onTitle(title);
+        }
+
+        metadataLength = null;
+        audioBytesUntilMeta = metaint;
+      }
+    }
+  });
+}
+
+function extractStreamTitle(metadata) {
+  const match = metadata.match(/StreamTitle='([^']*)'/);
+  return match ? match[1].trim() : "";
+}
+
+function sendMetadataEvent(res, payload) {
+  if (!res.destroyed) {
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  }
 }

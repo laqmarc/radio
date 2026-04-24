@@ -31,6 +31,8 @@ const state = {
   visualizerLevels: [],
   initialRouteHandled: false,
   filtersMobileMode: null,
+  metadataSource: null,
+  nowPlaying: "",
 };
 
 const els = {
@@ -54,6 +56,7 @@ const els = {
   audioPlayer: document.querySelector("#audioPlayer"),
   playerName: document.querySelector("#playerName"),
   playerMeta: document.querySelector("#playerMeta"),
+  nowPlaying: document.querySelector("#nowPlaying"),
   playerArt: document.querySelector("#playerArt"),
   visualizerToggle: document.querySelector("#visualizerToggle"),
   tvToggle: document.querySelector("#tvToggle"),
@@ -1314,6 +1317,8 @@ function playStation(station, streamIndex = 0, options = {}) {
   state.currentStation = station;
   state.currentStreamIndex = streamIndex;
   saveRecentStation(station);
+  clearNowPlaying();
+  startMetadataStream(streamUrl);
   if (options.updateRoute !== false) {
     updateStationRoute(station);
   }
@@ -1346,6 +1351,56 @@ function getAudioPlaybackUrl(streamUrl) {
   }
 
   return `/stream?url=${encodeURIComponent(streamUrl)}`;
+}
+
+function startMetadataStream(streamUrl) {
+  stopMetadataStream();
+
+  if (!canUseLocalProxy() || typeof EventSource === "undefined") {
+    return;
+  }
+
+  const metadataUrl = `/metadata?url=${encodeURIComponent(streamUrl)}`;
+  const source = new EventSource(metadataUrl);
+  state.metadataSource = source;
+
+  source.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.title) {
+        setNowPlaying(payload.title);
+      }
+    } catch {
+      // Ignore malformed metadata packets.
+    }
+  };
+
+  source.onerror = () => {
+    stopMetadataStream();
+  };
+}
+
+function stopMetadataStream() {
+  if (state.metadataSource) {
+    state.metadataSource.close();
+    state.metadataSource = null;
+  }
+}
+
+function setNowPlaying(title) {
+  state.nowPlaying = title;
+  els.nowPlaying.textContent = `Ara sona: ${title}`;
+  els.nowPlaying.hidden = false;
+
+  if (!els.tvView.hidden) {
+    els.tvStationMeta.textContent = title;
+  }
+}
+
+function clearNowPlaying() {
+  state.nowPlaying = "";
+  els.nowPlaying.textContent = "";
+  els.nowPlaying.hidden = true;
 }
 
 function canUseLocalProxy() {
