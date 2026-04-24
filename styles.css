@@ -67,23 +67,30 @@ h1 {
 }
 
 .status-pill {
-  border: 1px solid var(--line);
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  width: 14px;
+  height: 14px;
+  overflow: hidden;
+  border: 2px solid #fff;
   border-radius: 999px;
-  background: rgba(255, 253, 248, 0.75);
-  padding: 10px 14px;
-  color: var(--muted);
-  font-size: 0.88rem;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px rgba(102, 112, 133, 0.14), 0 8px 20px rgba(28, 36, 48, 0.22);
+  color: transparent;
+  font-size: 0;
   white-space: nowrap;
 }
 
 .status-pill.ok {
-  color: var(--accent-dark);
-  border-color: rgba(11, 122, 117, 0.35);
+  background: #16a34a;
+  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.16), 0 8px 20px rgba(28, 36, 48, 0.22);
 }
 
 .status-pill.error {
-  color: var(--danger);
-  border-color: rgba(180, 35, 24, 0.35);
+  background: #dc2626;
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.16), 0 8px 20px rgba(28, 36, 48, 0.22);
 }
 
 .app-shell {
@@ -937,6 +944,30 @@ audio {
     left: 10px;
     right: 10px;
     bottom: 10px;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .player-art {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .player-info,
+  .player audio {
+    grid-column: 2;
+  }
+
+  .player-info {
+    grid-row: 1;
+  }
+
+  .player audio {
+    grid-row: 2;
+  }
+
+  .visualizer-panel {
+    grid-column: 1 / -1;
   }
 
   .station-card {

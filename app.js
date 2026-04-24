@@ -30,6 +30,7 @@ const state = {
   lastSignalAt: 0,
   visualizerLevels: [],
   initialRouteHandled: false,
+  filtersMobileMode: null,
 };
 
 const els = {
@@ -132,7 +133,11 @@ function syncFilterDisclosure() {
   const disclosure = document.querySelector(".filter-disclosure");
   if (!disclosure) return;
 
-  if (window.matchMedia("(max-width: 640px)").matches) {
+  const mobile = window.matchMedia("(max-width: 640px)").matches;
+  if (state.filtersMobileMode === mobile) return;
+
+  state.filtersMobileMode = mobile;
+  if (mobile) {
     disclosure.removeAttribute("open");
   } else {
     disclosure.setAttribute("open", "");
@@ -1402,6 +1407,8 @@ function renderError() {
 
 function setStatus(text, type) {
   els.apiStatus.textContent = text;
+  els.apiStatus.title = text;
+  els.apiStatus.setAttribute("aria-label", text);
   els.apiStatus.className = `status-pill ${type || ""}`.trim();
 }
 
