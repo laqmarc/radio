@@ -12,7 +12,7 @@ const MIME_TYPES = {
   ".md": "text/markdown; charset=utf-8",
 };
 
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
 
   if (requestUrl.pathname === "/stream") {
@@ -31,7 +31,19 @@ http.createServer((req, res) => {
   }
 
   serveStatic(requestUrl, res);
-}).listen(PORT, () => {
+});
+
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`Port ${PORT} ocupat. Defineix PORT amb un port lliure o atura el proces que ja l'esta usant.`);
+    console.error("Exemple Linux/Plesk SSH: PORT=8010 npm start");
+    process.exit(1);
+  }
+
+  throw error;
+});
+
+server.listen(PORT, () => {
   console.log(`Radio Quexulo: http://localhost:${PORT}`);
 });
 
