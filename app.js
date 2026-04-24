@@ -155,9 +155,9 @@ async function loadFilterOptions() {
       getJson("/json/codecs?hidebroken=true&order=stationcount&reverse=true"),
     ]);
 
-    fillSelect(els.countrySelect, countries.slice(0, 180), "name", "iso_3166_1", "Tots");
-    fillSelect(els.languageSelect, languages.slice(0, 120), "name", "name", "Tots");
-    fillSelect(els.codecSelect, codecs.slice(0, 50), "name", "name", "Tots");
+    fillSelect(els.countrySelect, countries, "name", "iso_3166_1", "Tots");
+    fillSelect(els.languageSelect, languages, "name", "name", "Tots");
+    fillSelect(els.codecSelect, codecs, "name", "name", "Tots");
     setStatus("APIs connectades", "ok");
   } catch (error) {
     console.error(error);
@@ -378,6 +378,7 @@ function fillSelect(select, items, labelKey, valueKey, defaultLabel) {
 
   items
     .filter((item) => item[labelKey] && item[valueKey])
+    .sort((a, b) => String(a[labelKey]).localeCompare(String(b[labelKey]), "ca", { sensitivity: "base" }))
     .forEach((item) => {
       const count = item.stationcount ? ` (${item.stationcount})` : "";
       select.append(new Option(`${item[labelKey]}${count}`, item[valueKey]));
