@@ -933,7 +933,6 @@ audio {
 
   .toolbar,
   .station-grid,
-  .station-stats,
   .detail-grid,
   .player {
     grid-template-columns: 1fr;
@@ -1020,6 +1019,10 @@ audio {
 
   .station-card {
     min-height: auto;
+  }
+
+  .station-stats {
+    display: none;
   }
 
   .quality-row {
