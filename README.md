@@ -12,8 +12,7 @@ Web estatica per explorar emissores de radio de [Radio Browser](https://www.radi
 - Reproductor d'audio fix a la part inferior.
 - Estat de reproduccio: connectant, reproduint i error.
 - Reintent automatic amb un altre stream quan IPRD en te mes d'un.
-- Visualitzador de so amb boto d'ull, pantalla completa i modes `Barres` i `Ona`, optimitzats per seguir l'audio real quan s'executa amb `npm start`.
-  - Les barres representen bandes de frequencia: greus a l'esquerra, mitjos al centre i aguts a la dreta.
+- Visualitzador de so amb boto d'ull, pantalla completa i ona reactiva, optimitzada per seguir l'audio real quan s'executa amb `npm start`.
 - Modal de detall amb font, web oficial, tags, metadades i URL del stream.
 - Favorits persistents amb `localStorage`.
 - Historial de les ultimes emissores escoltades amb el preset `Recents`.

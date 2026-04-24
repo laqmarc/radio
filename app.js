@@ -20,8 +20,6 @@ const state = {
   currentStation: null,
   currentStreamIndex: 0,
   visualizerOpen: false,
-  visualizerMode: "bars",
-  tvMode: "bars",
   tvFrame: null,
   tvClockTimer: null,
   visualizerFrame: null,
@@ -31,7 +29,6 @@ const state = {
   frequencyData: null,
   waveformData: null,
   lastSignalAt: 0,
-  visualizerLevels: [],
   initialRouteHandled: false,
   filtersMobileMode: null,
   metadataSource: null,
@@ -73,7 +70,6 @@ const els = {
   tvClock: document.querySelector("#tvClock"),
   tvLogo: document.querySelector("#tvLogo"),
   tvCanvas: document.querySelector("#tvCanvas"),
-  tvModeButton: document.querySelector("#tvModeButton"),
   exitTvButton: document.querySelector("#exitTvButton"),
   songFinderButton: document.querySelector("#songFinderButton"),
 };
@@ -115,7 +111,6 @@ function bindEvents() {
   els.tvToggle.addEventListener("click", openCurrentStationInTvMode);
   els.songFinderButton.addEventListener("click", openSongFinder);
   els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
-  els.tvModeButton.addEventListener("click", toggleTvVisualizerMode);
   els.exitTvButton.addEventListener("click", exitTvMode);
   document.addEventListener("fullscreenchange", resizeVisualizerCanvas);
   window.addEventListener("resize", resizeVisualizerCanvas);
@@ -128,10 +123,6 @@ function bindEvents() {
     updatePlayerStatus("Reproduint");
   });
   els.audioPlayer.addEventListener("error", handlePlaybackError);
-
-  document.querySelectorAll("[data-visualizer-mode]").forEach((button) => {
-    button.addEventListener("click", () => setVisualizerMode(button.dataset.visualizerMode));
-  });
 
   document.querySelectorAll("[data-preset]").forEach((button) => {
     button.addEventListener("click", () => applyPreset(button.dataset.preset));
@@ -792,13 +783,6 @@ function toggleVisualizer() {
   }
 }
 
-function setVisualizerMode(mode) {
-  state.visualizerMode = mode === "wave" ? "wave" : "bars";
-  document.querySelectorAll("[data-visualizer-mode]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.visualizerMode === state.visualizerMode);
-  });
-}
-
 function startVisualizer() {
   stopVisualizer();
   setupVisualizerProbe();
@@ -880,11 +864,7 @@ function drawVisualizer() {
   ctx.clearRect(0, 0, width, height);
   drawVisualizerBackdrop(ctx, width, height, data.real);
 
-  if (state.visualizerMode === "wave") {
-    drawWave(ctx, data.waveform, data.frequency, width, height);
-  } else {
-    drawBars(ctx, data.frequency, width, height, data.real);
-  }
+  drawWave(ctx, data.waveform, data.frequency, width, height, data.real);
 
   drawSignalBadge(ctx, width, height, data.real);
 
@@ -951,129 +931,159 @@ function drawVisualizerBackdrop(ctx, width, height, real) {
   }
 }
 
-function drawBars(ctx, frequency, width, height, real) {
-  const bars = Math.min(84, Math.max(36, Math.floor(width / 14)));
-  const gap = Math.max(2, Math.floor(width / 420));
-  const barWidth = (width - gap * (bars - 1)) / bars;
-  const glow = real ? 16 : 8;
-  const levels = getSmoothedBarLevels(frequency, bars);
-  drawFrequencyGuides(ctx, width, height);
+function drawWave(ctx, waveform, frequency, width, height, real) {
+  const bass = getBandAverage(frequency, 0, 36);
+  const mid = getBandAverage(frequency, 36, 190);
+  const treble = getBandAverage(frequency, 190, frequency.length);
+  const time = performance.now() / 1000;
+  const centerY = height / 2;
+  const amplitude = height * (0.16 + bass * 0.24 + mid * 0.16);
+  const drift = Math.sin(time * 0.9) * height * 0.025;
+  const points = buildWavePoints(waveform, width, centerY + drift, amplitude);
 
-  for (let index = 0; index < bars; index += 1) {
-    const value = levels[index];
-    const barHeight = Math.max(6, Math.pow(value, 0.72) * (height - 48));
-    const x = index * (barWidth + gap);
-    const y = height - barHeight - 30;
-    const gradient = ctx.createLinearGradient(0, y, 0, height);
-    gradient.addColorStop(0, index % 3 === 0 ? "#5eead4" : index % 3 === 1 ? "#fbbf24" : "#f8fafc");
-    gradient.addColorStop(1, "#0f766e");
-    ctx.shadowColor = index % 3 === 1 ? "rgba(251, 191, 36, 0.7)" : "rgba(45, 212, 191, 0.7)";
-    ctx.shadowBlur = glow * value;
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, y, barWidth, barHeight);
-  }
+  drawWaveAura(ctx, points, width, height, bass, mid, treble);
 
-  ctx.shadowBlur = 0;
-}
-
-function getSmoothedBarLevels(frequency, bars) {
-  if (state.visualizerLevels.length !== bars) {
-    state.visualizerLevels = Array.from({ length: bars }, () => 0);
-  }
-
-  return state.visualizerLevels.map((previous, index) => {
-    const startRatio = index / bars;
-    const endRatio = (index + 1) / bars;
-    const start = Math.floor(logFrequencyPosition(startRatio) * frequency.length);
-    const end = Math.max(start + 1, Math.floor(logFrequencyPosition(endRatio) * frequency.length));
-    let total = 0;
-
-    for (let cursor = start; cursor < end; cursor += 1) {
-      total += frequency[cursor] || 0;
+  const fill = ctx.createLinearGradient(0, height * 0.18, 0, height * 0.88);
+  fill.addColorStop(0, "rgba(94, 234, 212, 0.26)");
+  fill.addColorStop(0.52, real ? "rgba(20, 184, 166, 0.12)" : "rgba(148, 163, 184, 0.10)");
+  fill.addColorStop(1, "rgba(251, 191, 36, 0.18)");
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, centerY);
+  points.forEach((point, index) => {
+    if (index === 0) ctx.lineTo(point.x, point.y);
+    else {
+      const previous = points[index - 1];
+      const controlX = (previous.x + point.x) / 2;
+      ctx.quadraticCurveTo(previous.x, previous.y, controlX, (previous.y + point.y) / 2);
     }
-
-    const raw = total / (end - start) / 255;
-    const compensation = 1 + Math.pow(startRatio, 1.35) * 2.1;
-    const floor = startRatio > 0.72 ? 0.035 : 0.015;
-    const normalized = Math.min(1, Math.max(floor, raw * compensation));
-    const next = previous * 0.68 + normalized * 0.32;
-    state.visualizerLevels[index] = next;
-    return next;
   });
-}
+  ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+  ctx.lineTo(width, height * 0.82);
+  ctx.lineTo(0, height * 0.82);
+  ctx.closePath();
+  ctx.fill();
 
-function logFrequencyPosition(ratio) {
-  return (Math.exp(ratio * 4.2) - 1) / (Math.exp(4.2) - 1);
-}
+  drawWaveLine(ctx, points, {
+    colorA: "#67e8f9",
+    colorB: "#5eead4",
+    width: 5 + bass * 7,
+    glow: 24 + bass * 44,
+    alpha: 0.96,
+  });
 
-function drawFrequencyGuides(ctx, width, height) {
-  const labels = [
-    { text: "greus", x: width * 0.08 },
-    { text: "mitjos", x: width * 0.42 },
-    { text: "aguts", x: width * 0.78 },
-  ];
+  const mirror = points.map((point) => ({
+    x: point.x,
+    y: centerY - (point.y - centerY) * (0.52 + treble * 0.25),
+  }));
+  drawWaveLine(ctx, mirror, {
+    colorA: "#fbbf24",
+    colorB: "#f8fafc",
+    width: 2.2 + treble * 3,
+    glow: 12 + treble * 28,
+    alpha: 0.68,
+  });
+
+  drawWaveSparkles(ctx, points, bass, treble, time);
 
   ctx.save();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "rgba(248, 250, 252, 0.12)";
-  ctx.fillStyle = "rgba(248, 250, 252, 0.58)";
-  ctx.font = "700 12px system-ui, sans-serif";
-
-  labels.forEach((label) => {
-    ctx.beginPath();
-    ctx.moveTo(label.x, 14);
-    ctx.lineTo(label.x, height - 24);
-    ctx.stroke();
-    ctx.fillText(label.text, label.x + 8, height - 10);
-  });
-
+  ctx.strokeStyle = "rgba(248, 250, 252, 0.18)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([8, 12]);
+  ctx.beginPath();
+  ctx.moveTo(width * 0.04, centerY);
+  ctx.lineTo(width * 0.96, centerY);
+  ctx.stroke();
   ctx.restore();
 }
 
-function drawWave(ctx, waveform, frequency, width, height) {
-  const bass = getBandAverage(frequency, 0, 32);
-  const mid = getBandAverage(frequency, 32, 180);
-  const centerY = height / 2;
-  const amplitude = height * (0.22 + bass * 0.2 + mid * 0.12);
+function buildWavePoints(waveform, width, centerY, amplitude) {
+  const pointCount = Math.min(180, Math.max(72, Math.floor(width / 8)));
+  const points = [];
 
-  ctx.lineWidth = 3 + bass * 5;
-  ctx.shadowColor = "rgba(45, 212, 191, 0.82)";
-  ctx.shadowBlur = 14 + bass * 28;
-  ctx.strokeStyle = "#5eead4";
+  for (let index = 0; index < pointCount; index += 1) {
+    const ratio = index / (pointCount - 1);
+    const cursor = Math.floor(ratio * (waveform.length - 1));
+    const previous = waveform[Math.max(0, cursor - 1)] || 128;
+    const current = waveform[cursor] || 128;
+    const next = waveform[Math.min(waveform.length - 1, cursor + 1)] || 128;
+    const normalized = ((previous + current * 2 + next) / 4 - 128) / 128;
+    const edgeFade = Math.sin(ratio * Math.PI);
+    points.push({
+      x: ratio * width,
+      y: centerY + normalized * amplitude * (0.35 + edgeFade * 0.85),
+    });
+  }
+
+  return points;
+}
+
+function drawWaveAura(ctx, points, width, height, bass, mid, treble) {
+  const pulse = 0.35 + bass * 0.65;
+  const radial = ctx.createRadialGradient(width * 0.52, height * 0.5, height * 0.08, width * 0.52, height * 0.5, width * 0.72);
+  radial.addColorStop(0, `rgba(45, 212, 191, ${0.16 + pulse * 0.18})`);
+  radial.addColorStop(0.52, `rgba(14, 165, 233, ${0.06 + mid * 0.12})`);
+  radial.addColorStop(1, "rgba(15, 23, 42, 0)");
+  ctx.fillStyle = radial;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.save();
+  ctx.globalAlpha = 0.34 + treble * 0.22;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(248, 250, 252, 0.08)";
+  for (let index = 0; index < 5; index += 1) {
+    const y = height * (0.24 + index * 0.13);
+    ctx.beginPath();
+    ctx.moveTo(width * 0.04, y);
+    ctx.lineTo(width * 0.96, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawWaveLine(ctx, points, options) {
+  const gradient = ctx.createLinearGradient(0, 0, points[points.length - 1].x, 0);
+  gradient.addColorStop(0, options.colorA);
+  gradient.addColorStop(0.5, options.colorB);
+  gradient.addColorStop(1, options.colorA);
+
+  ctx.save();
+  ctx.globalAlpha = options.alpha;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = options.width;
+  ctx.strokeStyle = gradient;
+  ctx.shadowColor = options.colorB;
+  ctx.shadowBlur = options.glow;
   ctx.beginPath();
-
-  waveform.forEach((value, index) => {
-    const x = index / (waveform.length - 1) * width;
-    const normalized = (value - 128) / 128;
-    const y = centerY + normalized * amplitude;
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
+  points.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(point.x, point.y);
+    else {
+      const previous = points[index - 1];
+      const controlX = (previous.x + point.x) / 2;
+      ctx.quadraticCurveTo(previous.x, previous.y, controlX, (previous.y + point.y) / 2);
     }
   });
-
+  ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
   ctx.stroke();
-  ctx.shadowBlur = 0;
+  ctx.restore();
+}
 
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(251, 191, 36, 0.86)";
-  ctx.beginPath();
-  waveform.forEach((value, index) => {
-    const x = index / (waveform.length - 1) * width;
-    const normalized = (value - 128) / 128;
-    const y = centerY - normalized * amplitude * 0.62;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "rgba(248, 250, 252, 0.28)";
-  ctx.beginPath();
-  ctx.moveTo(0, height / 2);
-  ctx.lineTo(width, height / 2);
-  ctx.stroke();
+function drawWaveSparkles(ctx, points, bass, treble, time) {
+  ctx.save();
+  for (let index = 0; index < 10; index += 1) {
+    const cursor = Math.floor(((index * 0.097 + time * 0.035) % 1) * (points.length - 1));
+    const point = points[cursor];
+    const radius = 1.5 + ((index % 4) + bass * 4 + treble * 3);
+    ctx.globalAlpha = 0.18 + ((Math.sin(time * 2.2 + index) + 1) / 2) * 0.34;
+    ctx.fillStyle = index % 2 ? "#fbbf24" : "#67e8f9";
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 12 + radius * 3;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawSignalBadge(ctx, width, height, real) {
@@ -1428,11 +1438,6 @@ function updateTvClock() {
   }).format(new Date());
 }
 
-function toggleTvVisualizerMode() {
-  state.tvMode = state.tvMode === "bars" ? "wave" : "bars";
-  els.tvModeButton.textContent = state.tvMode === "bars" ? "Veure ona" : "Veure barres";
-}
-
 function stopTvVisualizer() {
   if (state.tvFrame) {
     cancelAnimationFrame(state.tvFrame);
@@ -1457,11 +1462,7 @@ function drawTvVisualizer() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawVisualizerBackdrop(ctx, canvas.width, canvas.height, data.real);
 
-  if (state.tvMode === "wave") {
-    drawWave(ctx, data.waveform, data.frequency, canvas.width, canvas.height);
-  } else {
-    drawBars(ctx, data.frequency, canvas.width, canvas.height, data.real);
-  }
+  drawWave(ctx, data.waveform, data.frequency, canvas.width, canvas.height, data.real);
 
   drawSignalBadge(ctx, canvas.width, canvas.height, data.real);
   state.tvFrame = requestAnimationFrame(drawTvVisualizer);
