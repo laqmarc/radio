@@ -18,6 +18,9 @@ const state = {
   currentStreamIndex: 0,
   visualizerOpen: false,
   visualizerMode: "bars",
+  tvMode: "bars",
+  tvFrame: null,
+  tvClockTimer: null,
   visualizerFrame: null,
   visualizerSource: null,
   audioContext: null,
@@ -26,6 +29,7 @@ const state = {
   waveformData: null,
   lastSignalAt: 0,
   visualizerLevels: [],
+  initialRouteHandled: false,
 };
 
 const els = {
@@ -54,6 +58,14 @@ const els = {
   visualizerPanel: document.querySelector("#visualizerPanel"),
   visualizerCanvas: document.querySelector("#visualizerCanvas"),
   fullscreenVisualizerButton: document.querySelector("#fullscreenVisualizerButton"),
+  tvView: document.querySelector("#tvView"),
+  tvStationName: document.querySelector("#tvStationName"),
+  tvStationMeta: document.querySelector("#tvStationMeta"),
+  tvClock: document.querySelector("#tvClock"),
+  tvLogo: document.querySelector("#tvLogo"),
+  tvCanvas: document.querySelector("#tvCanvas"),
+  tvModeButton: document.querySelector("#tvModeButton"),
+  exitTvButton: document.querySelector("#exitTvButton"),
 };
 
 const debounce = (fn, wait = 350) => {
@@ -69,6 +81,7 @@ init();
 async function init() {
   bindEvents();
   await Promise.all([loadFilterOptions(), loadStations(true)]);
+  await handleInitialRoute();
 }
 
 function bindEvents() {
@@ -89,8 +102,11 @@ function bindEvents() {
   els.loadMoreButton.addEventListener("click", () => loadStations(false));
   els.visualizerToggle.addEventListener("click", toggleVisualizer);
   els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
+  els.tvModeButton.addEventListener("click", toggleTvVisualizerMode);
+  els.exitTvButton.addEventListener("click", exitTvMode);
   document.addEventListener("fullscreenchange", resizeVisualizerCanvas);
   window.addEventListener("resize", resizeVisualizerCanvas);
+  window.addEventListener("hashchange", handleInitialRoute);
   els.audioPlayer.addEventListener("loadstart", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("waiting", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("playing", () => {
@@ -407,6 +423,8 @@ function getBestReliability(station) {
 function normalizeRadioBrowserStation(station) {
   return {
     ...station,
+    shareSource: "radio-browser",
+    shareId: station.stationuuid,
     source: "Radio Browser",
     streamUrl: station.url_resolved || station.url,
     streamUrls: [station.url_resolved || station.url].filter(Boolean),
@@ -426,6 +444,8 @@ function normalizeIprdStation(station) {
 
   return {
     stationuuid: `iprd:${station.id || station.name}`,
+    shareSource: "iprd",
+    shareId: station.id || station.name,
     name: station.name,
     country: station.country,
     state: "",
@@ -970,6 +990,181 @@ function findStation(uuid) {
     || state.recents.get(uuid);
 }
 
+async function handleInitialRoute() {
+  const route = getStationRoute();
+  if (!route) return;
+
+  const existing = findStationByRoute(route.source, route.id);
+  if (existing) {
+    playStation(existing, 0, { updateRoute: false });
+    if (isTvRoute()) enterTvMode(existing);
+    return;
+  }
+
+  try {
+    setStatus("Carregant emissora", "ok");
+    const station = await fetchStationByRoute(route.source, route.id);
+    if (!station) {
+      setStatus("Emissora no trobada", "error");
+      return;
+    }
+
+    state.stations = dedupeStations([station, ...state.stations]);
+    renderStations();
+    playStation(station, 0, { updateRoute: false });
+    if (isTvRoute()) enterTvMode(station);
+  } catch (error) {
+    console.error(error);
+    setStatus("No s'ha pogut carregar l'enllac", "error");
+  }
+}
+
+function isTvRoute() {
+  return new URLSearchParams(location.search).get("view") === "tv";
+}
+
+function getStationRoute() {
+  const match = location.hash.match(/^#\/station\/([^/]+)\/(.+)$/);
+  if (!match) return null;
+
+  return {
+    source: decodeURIComponent(match[1]),
+    id: decodeURIComponent(match[2]),
+  };
+}
+
+function findStationByRoute(source, id) {
+  return [...state.stations, ...state.favorites.values(), ...state.recents.values()]
+    .find((station) => station.shareSource === source && station.shareId === id);
+}
+
+async function fetchStationByRoute(source, id) {
+  if (source === "radio-browser") {
+    const items = await getJson(`/json/stations/byuuid?uuids=${encodeURIComponent(id)}`);
+    return items[0] ? normalizeRadioBrowserStation(items[0]) : null;
+  }
+
+  if (source === "iprd") {
+    const catalog = await getIprdCatalog();
+    const station = catalog.find((item) => String(item.id || item.name) === id);
+    return station ? normalizeIprdStation(station) : null;
+  }
+
+  return null;
+}
+
+function getShareUrl(station) {
+  const source = station.shareSource || (station.source === "IPRD" ? "iprd" : "radio-browser");
+  const id = station.shareId || station.stationuuid;
+  return `${location.origin}${location.pathname}#/station/${encodeURIComponent(source)}/${encodeURIComponent(id)}`;
+}
+
+function getTvUrl(station) {
+  const source = station.shareSource || (station.source === "IPRD" ? "iprd" : "radio-browser");
+  const id = station.shareId || station.stationuuid;
+  return `${location.origin}${location.pathname}?view=tv#/station/${encodeURIComponent(source)}/${encodeURIComponent(id)}`;
+}
+
+function updateStationRoute(station) {
+  history.replaceState(null, "", getShareUrl(station));
+}
+
+async function copyStationLink(station, button) {
+  const url = getShareUrl(station);
+
+  try {
+    await navigator.clipboard.writeText(url);
+    button.textContent = "Copiat";
+  } catch {
+    window.prompt("Copia aquest enllac", url);
+  }
+
+  window.setTimeout(() => {
+    button.textContent = "Comparteix";
+  }, 1400);
+}
+
+function enterTvMode(station) {
+  els.tvView.hidden = false;
+  document.body.classList.add("tv-active");
+  updateTvStation(station);
+  startVisualizer();
+  startTvClock();
+  stopTvVisualizer();
+  drawTvVisualizer();
+}
+
+function exitTvMode() {
+  els.tvView.hidden = true;
+  document.body.classList.remove("tv-active");
+  stopTvVisualizer();
+  window.clearInterval(state.tvClockTimer);
+
+  if (state.currentStation) {
+    window.history.replaceState(null, "", getShareUrl(state.currentStation));
+  }
+}
+
+function updateTvStation(station) {
+  els.tvStationName.textContent = station.name || "Radio";
+  els.tvStationMeta.textContent = [station.country, station.source, station.codec].filter(Boolean).join(" - ");
+  els.tvLogo.textContent = getInitials(station.name);
+  els.tvLogo.style.backgroundImage = station.favicon ? `url("${station.favicon.replaceAll('"', "%22")}")` : "";
+  els.tvLogo.classList.toggle("has-logo", Boolean(station.favicon));
+}
+
+function startTvClock() {
+  updateTvClock();
+  window.clearInterval(state.tvClockTimer);
+  state.tvClockTimer = window.setInterval(updateTvClock, 1000);
+}
+
+function updateTvClock() {
+  els.tvClock.textContent = new Intl.DateTimeFormat("ca", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function toggleTvVisualizerMode() {
+  state.tvMode = state.tvMode === "bars" ? "wave" : "bars";
+  els.tvModeButton.textContent = state.tvMode === "bars" ? "Veure ona" : "Veure barres";
+}
+
+function stopTvVisualizer() {
+  if (state.tvFrame) {
+    cancelAnimationFrame(state.tvFrame);
+    state.tvFrame = null;
+  }
+}
+
+function drawTvVisualizer() {
+  const canvas = els.tvCanvas;
+  const rect = canvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  const nextWidth = Math.max(900, Math.floor(rect.width * scale));
+  const nextHeight = Math.max(420, Math.floor(rect.height * scale));
+
+  if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+  }
+
+  const ctx = canvas.getContext("2d");
+  const data = getVisualizerData();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawVisualizerBackdrop(ctx, canvas.width, canvas.height, data.real);
+
+  if (state.tvMode === "wave") {
+    drawWave(ctx, data.waveform, data.frequency, canvas.width, canvas.height);
+  } else {
+    drawBars(ctx, data.frequency, canvas.width, canvas.height, data.real);
+  }
+
+  drawSignalBadge(ctx, canvas.width, canvas.height, data.real);
+  state.tvFrame = requestAnimationFrame(drawTvVisualizer);
+}
+
 function showStationDetails(station) {
   closeStationDetails();
 
@@ -1005,6 +1200,8 @@ function showStationDetails(station) {
       <div class="detail-links">
         ${station.homepage ? `<a href="${escapeAttribute(station.homepage)}" target="_blank" rel="noreferrer">Web oficial</a>` : ""}
         ${streamUrls[0] ? `<a href="${escapeAttribute(streamUrls[0])}" target="_blank" rel="noreferrer">Obre stream</a>` : ""}
+        <button class="link-button" type="button" data-share-station="${escapeAttribute(station.stationuuid)}">Comparteix</button>
+        <a href="${escapeAttribute(getTvUrl(station))}" target="_blank" rel="noreferrer">Mode TV</a>
       </div>
       <label class="stream-field">
         <span>URL stream</span>
@@ -1016,6 +1213,13 @@ function showStationDetails(station) {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog || event.target.closest("[data-close-modal]")) {
       closeStationDetails();
+      return;
+    }
+
+    const shareButton = event.target.closest("[data-share-station]");
+    if (shareButton) {
+      const stationToShare = findStation(shareButton.dataset.shareStation);
+      if (stationToShare) copyStationLink(stationToShare, shareButton);
     }
   });
 
@@ -1044,7 +1248,7 @@ function handleModalKeydown(event) {
   }
 }
 
-function playStation(station, streamIndex = 0) {
+function playStation(station, streamIndex = 0, options = {}) {
   const streamUrls = station.streamUrls?.length
     ? station.streamUrls
     : [station.streamUrl || station.url_resolved || station.url].filter(Boolean);
@@ -1059,6 +1263,9 @@ function playStation(station, streamIndex = 0) {
   state.currentStation = station;
   state.currentStreamIndex = streamIndex;
   saveRecentStation(station);
+  if (options.updateRoute !== false) {
+    updateStationRoute(station);
+  }
   els.audioPlayer.crossOrigin = "anonymous";
   els.audioPlayer.src = getAudioPlaybackUrl(streamUrl);
   if (state.visualizerOpen) {

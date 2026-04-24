@@ -19,6 +19,8 @@ Web estatica per explorar emissores de radio de [Radio Browser](https://www.radi
 - Historial de les ultimes emissores escoltades amb el preset `Recents`.
 - Filtres de qualitat: nomes HTTPS, amagar HLS, emissores amb logo i bitrate minim.
 - Boto `Aleatoria` per reproduir una emissora dels resultats carregats.
+- Enllacos compartibles d'emissora amb format `#/station/{font}/{id}` i boto `Comparteix` al modal.
+- Mode pantalla gran amb format `?view=tv#/station/{font}/{id}`, logo, hora i visualitzador gran.
 - Paginacio amb boto `Carrega mes`.
 - Filtre `hidebroken=true` per evitar emissores marcades com trencades.
 

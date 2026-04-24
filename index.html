@@ -130,6 +130,26 @@
       </section>
     </aside>
 
+    <section class="tv-view" id="tvView" hidden aria-label="Mode pantalla gran">
+      <div class="tv-backdrop"></div>
+      <header class="tv-header">
+        <div>
+          <p>Radio Quexulo</p>
+          <h2 id="tvStationName">Radio</h2>
+          <span id="tvStationMeta">Preparant emissora...</span>
+        </div>
+        <div class="tv-clock" id="tvClock">--:--</div>
+      </header>
+      <main class="tv-main">
+        <div class="tv-logo" id="tvLogo">RQ</div>
+        <canvas id="tvCanvas" width="1600" height="780"></canvas>
+      </main>
+      <footer class="tv-footer">
+        <button class="mode-button" type="button" id="tvModeButton">Canvia visual</button>
+        <button class="mode-button" type="button" id="exitTvButton">Sortir</button>
+      </footer>
+    </section>
+
     <script src="app.js"></script>
   </body>
 </html>
