@@ -969,7 +969,7 @@ function renderStationCard(station) {
         </div>
       </div>
       <div class="tags">
-        ${tags.length ? tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("") : `<span class="tag">radio</span>`}
+        ${tags.length ? tags.map((tag) => `<button class="tag tag-button" type="button" data-tag-search="${escapeAttribute(tag)}">${escapeHtml(tag)}</button>`).join("") : `<button class="tag tag-button" type="button" data-tag-search="radio">radio</button>`}
       </div>
       <div class="station-stats">
         <div class="stat"><span>Codec</span><strong>${codec}</strong></div>
@@ -1006,6 +1006,24 @@ function bindStationButtons() {
       if (station) showStationDetails(station);
     });
   });
+
+  els.stationGrid.querySelectorAll("[data-tag-search]").forEach((button) => {
+    button.addEventListener("click", () => searchByTag(button.dataset.tagSearch));
+  });
+}
+
+function searchByTag(tag) {
+  const disclosure = document.querySelector(".filter-disclosure");
+  if (disclosure && window.matchMedia("(max-width: 640px)").matches) {
+    disclosure.setAttribute("open", "");
+  }
+
+  state.preset = "all";
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.preset === "all");
+  });
+  els.searchInput.value = tag;
+  loadStations(true);
 }
 
 function findStation(uuid) {
