@@ -16,6 +16,16 @@ const state = {
   iprdStations: null,
   currentStation: null,
   currentStreamIndex: 0,
+  visualizerOpen: false,
+  visualizerMode: "bars",
+  visualizerFrame: null,
+  visualizerSource: null,
+  audioContext: null,
+  analyser: null,
+  frequencyData: null,
+  waveformData: null,
+  lastSignalAt: 0,
+  visualizerLevels: [],
 };
 
 const els = {
@@ -26,15 +36,24 @@ const els = {
   codecSelect: document.querySelector("#codecSelect"),
   sourceSelect: document.querySelector("#sourceSelect"),
   orderSelect: document.querySelector("#orderSelect"),
+  httpsOnlyInput: document.querySelector("#httpsOnlyInput"),
+  hideHlsInput: document.querySelector("#hideHlsInput"),
+  logoOnlyInput: document.querySelector("#logoOnlyInput"),
+  minBitrateInput: document.querySelector("#minBitrateInput"),
   stationGrid: document.querySelector("#stationGrid"),
   resultTitle: document.querySelector("#resultTitle"),
   resultMeta: document.querySelector("#resultMeta"),
   refreshButton: document.querySelector("#refreshButton"),
+  randomButton: document.querySelector("#randomButton"),
   loadMoreButton: document.querySelector("#loadMoreButton"),
   audioPlayer: document.querySelector("#audioPlayer"),
   playerName: document.querySelector("#playerName"),
   playerMeta: document.querySelector("#playerMeta"),
   playerArt: document.querySelector("#playerArt"),
+  visualizerToggle: document.querySelector("#visualizerToggle"),
+  visualizerPanel: document.querySelector("#visualizerPanel"),
+  visualizerCanvas: document.querySelector("#visualizerCanvas"),
+  fullscreenVisualizerButton: document.querySelector("#fullscreenVisualizerButton"),
 };
 
 const debounce = (fn, wait = 350) => {
@@ -61,8 +80,17 @@ function bindEvents() {
   els.codecSelect.addEventListener("change", () => loadStations(true));
   els.sourceSelect.addEventListener("change", () => loadStations(true));
   els.orderSelect.addEventListener("change", () => loadStations(true));
+  els.httpsOnlyInput.addEventListener("change", () => loadStations(true));
+  els.hideHlsInput.addEventListener("change", () => loadStations(true));
+  els.logoOnlyInput.addEventListener("change", () => loadStations(true));
+  els.minBitrateInput.addEventListener("input", debounce(() => loadStations(true), 250));
   els.refreshButton.addEventListener("click", () => loadStations(true));
+  els.randomButton.addEventListener("click", playRandomStation);
   els.loadMoreButton.addEventListener("click", () => loadStations(false));
+  els.visualizerToggle.addEventListener("click", toggleVisualizer);
+  els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
+  document.addEventListener("fullscreenchange", resizeVisualizerCanvas);
+  window.addEventListener("resize", resizeVisualizerCanvas);
   els.audioPlayer.addEventListener("loadstart", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("waiting", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("playing", () => {
@@ -70,6 +98,10 @@ function bindEvents() {
     updatePlayerStatus("Reproduint");
   });
   els.audioPlayer.addEventListener("error", handlePlaybackError);
+
+  document.querySelectorAll("[data-visualizer-mode]").forEach((button) => {
+    button.addEventListener("click", () => setVisualizerMode(button.dataset.visualizerMode));
+  });
 
   document.querySelectorAll("[data-preset]").forEach((button) => {
     button.addEventListener("click", () => applyPreset(button.dataset.preset));
@@ -119,7 +151,8 @@ async function loadStations(reset) {
   try {
     const items = await loadStationsForSelectedSource();
 
-    state.stations = reset ? items : state.stations.concat(items);
+    const nextStations = reset ? items : state.stations.concat(items);
+    state.stations = dedupeStations(nextStations);
     state.offset += items.length;
     state.hasMore = items.length === PAGE_SIZE;
     renderStations();
@@ -164,7 +197,7 @@ async function loadAllSourcesStations() {
 async function loadRadioBrowserStations() {
   const params = buildRadioBrowserParams();
   const items = await getJson(`/json/stations/search?${params.toString()}`);
-  return items.map(normalizeRadioBrowserStation);
+  return items.map(normalizeRadioBrowserStation).filter(matchesQualityFilters);
 }
 
 async function loadIprdStations() {
@@ -175,7 +208,8 @@ async function loadIprdStations() {
 
   return filtered
     .slice(state.offset, state.offset + PAGE_SIZE)
-    .map(normalizeIprdStation);
+    .map(normalizeIprdStation)
+    .filter(matchesQualityFilters);
 }
 
 function interleaveStations(...groups) {
@@ -210,6 +244,29 @@ function dedupeStations(stations) {
   });
 }
 
+function matchesQualityFilters(station) {
+  const streamUrl = station.streamUrl || station.url_resolved || station.url || "";
+  const minBitrate = Number(els.minBitrateInput.value) || 0;
+
+  if (els.httpsOnlyInput.checked && !streamUrl.toLowerCase().startsWith("https://")) {
+    return false;
+  }
+
+  if (els.hideHlsInput.checked && Number(station.hls) === 1) {
+    return false;
+  }
+
+  if (els.logoOnlyInput.checked && !station.favicon) {
+    return false;
+  }
+
+  if (minBitrate > 0 && (Number(station.bitrate) || 0) < minBitrate) {
+    return false;
+  }
+
+  return true;
+}
+
 function normalizeDedupeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -233,6 +290,7 @@ function buildRadioBrowserParams() {
   if (els.countrySelect.value) params.set("countrycode", els.countrySelect.value);
   if (els.languageSelect.value) params.set("language", els.languageSelect.value);
   if (els.codecSelect.value) params.set("codec", els.codecSelect.value);
+  if (els.httpsOnlyInput.checked) params.set("is_https", "true");
 
   if (state.preset === "music") params.set("tag", "music");
   if (state.preset === "news") params.set("tag", "news");
@@ -381,6 +439,7 @@ function normalizeIprdStation(station) {
     streamUrls: streams.map((item) => item.url).filter(Boolean),
     url: stream.url,
     url_resolved: stream.url,
+    hls: String(stream.url || "").toLowerCase().includes(".m3u8") ? 1 : 0,
     tagsList: [...new Set(tagsList)],
     statLabel: "Fiabilitat",
     statValue: stream.reliability ? `${Math.round(Number(stream.reliability) * 100)}%` : "n/d",
@@ -442,6 +501,347 @@ function applyPreset(preset) {
   }
 
   loadStations(true);
+}
+
+function playRandomStation() {
+  const playableStations = state.stations.filter((station) => (
+    station.streamUrl || station.url_resolved || station.url
+  ));
+
+  if (!playableStations.length) {
+    setStatus("Carrega emissores abans", "error");
+    return;
+  }
+
+  const randomIndex = Math.floor(Math.random() * playableStations.length);
+  playStation(playableStations[randomIndex]);
+}
+
+function toggleVisualizer() {
+  state.visualizerOpen = !state.visualizerOpen;
+  els.visualizerPanel.hidden = !state.visualizerOpen;
+  els.visualizerToggle.classList.toggle("active", state.visualizerOpen);
+  els.visualizerToggle.setAttribute("aria-label", state.visualizerOpen ? "Amaga visualitzador" : "Mostra visualitzador");
+
+  if (state.visualizerOpen) {
+    startVisualizer();
+  } else {
+    stopVisualizer();
+  }
+}
+
+function setVisualizerMode(mode) {
+  state.visualizerMode = mode === "wave" ? "wave" : "bars";
+  document.querySelectorAll("[data-visualizer-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.visualizerMode === state.visualizerMode);
+  });
+}
+
+function startVisualizer() {
+  stopVisualizer();
+  setupVisualizerProbe();
+  resizeVisualizerCanvas();
+  drawVisualizer();
+}
+
+function toggleVisualizerFullscreen() {
+  if (!document.fullscreenElement) {
+    els.visualizerPanel.requestFullscreen?.();
+  } else {
+    document.exitFullscreen?.();
+  }
+}
+
+function resizeVisualizerCanvas() {
+  const canvas = els.visualizerCanvas;
+  const rect = canvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  const nextWidth = Math.max(640, Math.floor(rect.width * scale));
+  const nextHeight = Math.max(220, Math.floor(rect.height * scale));
+
+  if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+  }
+
+  const fullscreen = document.fullscreenElement === els.visualizerPanel;
+  els.fullscreenVisualizerButton.textContent = fullscreen ? "Surt de pantalla completa" : "Pantalla completa";
+}
+
+function stopVisualizer() {
+  if (state.visualizerFrame) {
+    cancelAnimationFrame(state.visualizerFrame);
+    state.visualizerFrame = null;
+  }
+}
+
+function setupVisualizerProbe() {
+  const streamUrl = els.audioPlayer.currentSrc || els.audioPlayer.src;
+  if (!streamUrl || !canUseLocalProxy() || !window.AudioContext && !window.webkitAudioContext) {
+    return;
+  }
+
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    state.audioContext = state.audioContext || new AudioContextClass();
+
+    if (!state.visualizerSource) {
+      state.visualizerSource = state.audioContext.createMediaElementSource(els.audioPlayer);
+    }
+
+    if (!state.analyser) {
+      state.analyser = state.audioContext.createAnalyser();
+      state.analyser.fftSize = 1024;
+      state.analyser.smoothingTimeConstant = 0.74;
+      state.frequencyData = new Uint8Array(state.analyser.frequencyBinCount);
+      state.waveformData = new Uint8Array(state.analyser.fftSize);
+      state.visualizerSource.connect(state.analyser);
+      state.analyser.connect(state.audioContext.destination);
+    }
+
+    state.audioContext.resume().catch(() => {});
+  } catch (error) {
+    console.warn("Visualitzador real no disponible; usant mode animat", error);
+    state.analyser = null;
+    state.frequencyData = null;
+    state.waveformData = null;
+  }
+}
+
+function drawVisualizer() {
+  const canvas = els.visualizerCanvas;
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  const data = getVisualizerData();
+
+  ctx.clearRect(0, 0, width, height);
+  drawVisualizerBackdrop(ctx, width, height, data.real);
+
+  if (state.visualizerMode === "wave") {
+    drawWave(ctx, data.waveform, data.frequency, width, height);
+  } else {
+    drawBars(ctx, data.frequency, width, height, data.real);
+  }
+
+  drawSignalBadge(ctx, width, height, data.real);
+
+  state.visualizerFrame = requestAnimationFrame(drawVisualizer);
+}
+
+function getVisualizerData() {
+  if (state.analyser && state.frequencyData && state.waveformData) {
+    state.analyser.getByteFrequencyData(state.frequencyData);
+    state.analyser.getByteTimeDomainData(state.waveformData);
+
+    const signal = state.frequencyData.reduce((total, value) => total + value, 0) / state.frequencyData.length;
+    if (signal > 1.5) {
+      state.lastSignalAt = performance.now();
+      return {
+        frequency: state.frequencyData,
+        waveform: state.waveformData,
+        real: true,
+      };
+    }
+  }
+
+  return getFallbackVisualizerData();
+}
+
+function getFallbackVisualizerData() {
+  const frequency = new Uint8Array(128);
+  const waveform = new Uint8Array(256);
+  const time = performance.now() / 1000;
+  const playing = !els.audioPlayer.paused && !els.audioPlayer.ended;
+  const beat = Math.pow((Math.sin(time * 3.2) + 1) / 2, 3);
+  const energy = playing ? 0.82 + beat * 0.5 : 0.18;
+
+  frequency.forEach((_, index) => {
+    const bass = Math.sin(time * 6.1 + index * 0.07) * Math.max(0, 1 - index / 58);
+    const wave = Math.sin(time * 3.4 + index * 0.22);
+    const shimmer = Math.sin(time * 12 + index * 0.47);
+    frequency[index] = Math.max(8, Math.min(255, Math.round((58 + bass * 96 + wave * 46 + shimmer * 16) * energy)));
+  });
+
+  waveform.forEach((_, index) => {
+    waveform[index] = Math.round(128 + Math.sin(time * 3 + index * 0.08) * 44 * energy + Math.sin(time * 7 + index * 0.018) * 22 * energy);
+  });
+
+  return { frequency, waveform, real: false };
+}
+
+function drawVisualizerBackdrop(ctx, width, height, real) {
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#071a22");
+  gradient.addColorStop(0.42, "#111827");
+  gradient.addColorStop(1, real ? "#062f2c" : "#1f2937");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  const time = performance.now() / 1000;
+  for (let index = 0; index < 36; index += 1) {
+    const x = (Math.sin(time * 0.3 + index * 1.7) * 0.5 + 0.5) * width;
+    const y = (Math.cos(time * 0.25 + index * 1.2) * 0.5 + 0.5) * height;
+    ctx.fillStyle = index % 2 === 0 ? "rgba(45, 212, 191, 0.12)" : "rgba(245, 158, 11, 0.10)";
+    ctx.beginPath();
+    ctx.arc(x, y, 2 + (index % 5), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawBars(ctx, frequency, width, height, real) {
+  const bars = Math.min(84, Math.max(36, Math.floor(width / 14)));
+  const gap = Math.max(2, Math.floor(width / 420));
+  const barWidth = (width - gap * (bars - 1)) / bars;
+  const glow = real ? 16 : 8;
+  const levels = getSmoothedBarLevels(frequency, bars);
+  drawFrequencyGuides(ctx, width, height);
+
+  for (let index = 0; index < bars; index += 1) {
+    const value = levels[index];
+    const barHeight = Math.max(6, Math.pow(value, 0.72) * (height - 48));
+    const x = index * (barWidth + gap);
+    const y = height - barHeight - 30;
+    const gradient = ctx.createLinearGradient(0, y, 0, height);
+    gradient.addColorStop(0, index % 3 === 0 ? "#5eead4" : index % 3 === 1 ? "#fbbf24" : "#f8fafc");
+    gradient.addColorStop(1, "#0f766e");
+    ctx.shadowColor = index % 3 === 1 ? "rgba(251, 191, 36, 0.7)" : "rgba(45, 212, 191, 0.7)";
+    ctx.shadowBlur = glow * value;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, barWidth, barHeight);
+  }
+
+  ctx.shadowBlur = 0;
+}
+
+function getSmoothedBarLevels(frequency, bars) {
+  if (state.visualizerLevels.length !== bars) {
+    state.visualizerLevels = Array.from({ length: bars }, () => 0);
+  }
+
+  return state.visualizerLevels.map((previous, index) => {
+    const startRatio = index / bars;
+    const endRatio = (index + 1) / bars;
+    const start = Math.floor(logFrequencyPosition(startRatio) * frequency.length);
+    const end = Math.max(start + 1, Math.floor(logFrequencyPosition(endRatio) * frequency.length));
+    let total = 0;
+
+    for (let cursor = start; cursor < end; cursor += 1) {
+      total += frequency[cursor] || 0;
+    }
+
+    const raw = total / (end - start) / 255;
+    const compensation = 1 + Math.pow(startRatio, 1.35) * 2.1;
+    const floor = startRatio > 0.72 ? 0.035 : 0.015;
+    const normalized = Math.min(1, Math.max(floor, raw * compensation));
+    const next = previous * 0.68 + normalized * 0.32;
+    state.visualizerLevels[index] = next;
+    return next;
+  });
+}
+
+function logFrequencyPosition(ratio) {
+  return (Math.exp(ratio * 4.2) - 1) / (Math.exp(4.2) - 1);
+}
+
+function drawFrequencyGuides(ctx, width, height) {
+  const labels = [
+    { text: "greus", x: width * 0.08 },
+    { text: "mitjos", x: width * 0.42 },
+    { text: "aguts", x: width * 0.78 },
+  ];
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(248, 250, 252, 0.12)";
+  ctx.fillStyle = "rgba(248, 250, 252, 0.58)";
+  ctx.font = "700 12px system-ui, sans-serif";
+
+  labels.forEach((label) => {
+    ctx.beginPath();
+    ctx.moveTo(label.x, 14);
+    ctx.lineTo(label.x, height - 24);
+    ctx.stroke();
+    ctx.fillText(label.text, label.x + 8, height - 10);
+  });
+
+  ctx.restore();
+}
+
+function drawWave(ctx, waveform, frequency, width, height) {
+  const bass = getBandAverage(frequency, 0, 32);
+  const mid = getBandAverage(frequency, 32, 180);
+  const centerY = height / 2;
+  const amplitude = height * (0.22 + bass * 0.2 + mid * 0.12);
+
+  ctx.lineWidth = 3 + bass * 5;
+  ctx.shadowColor = "rgba(45, 212, 191, 0.82)";
+  ctx.shadowBlur = 14 + bass * 28;
+  ctx.strokeStyle = "#5eead4";
+  ctx.beginPath();
+
+  waveform.forEach((value, index) => {
+    const x = index / (waveform.length - 1) * width;
+    const normalized = (value - 128) / 128;
+    const y = centerY + normalized * amplitude;
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(251, 191, 36, 0.86)";
+  ctx.beginPath();
+  waveform.forEach((value, index) => {
+    const x = index / (waveform.length - 1) * width;
+    const normalized = (value - 128) / 128;
+    const y = centerY - normalized * amplitude * 0.62;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(248, 250, 252, 0.28)";
+  ctx.beginPath();
+  ctx.moveTo(0, height / 2);
+  ctx.lineTo(width, height / 2);
+  ctx.stroke();
+}
+
+function drawSignalBadge(ctx, width, height, real) {
+  const text = real ? "audio real" : (canUseLocalProxy() ? "esperant senyal" : "obre amb npm start");
+  const paddingX = 12;
+  const badgeHeight = 28;
+  ctx.font = "700 13px system-ui, sans-serif";
+  const badgeWidth = ctx.measureText(text).width + paddingX * 2;
+  const x = width - badgeWidth - 14;
+  const y = 14;
+
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = real ? "rgba(6, 95, 70, 0.84)" : "rgba(127, 29, 29, 0.74)";
+  ctx.beginPath();
+  ctx.roundRect(x, y, badgeWidth, badgeHeight, 7);
+  ctx.fill();
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillText(text, x + paddingX, y + 18);
+}
+
+function getBandAverage(data, start, end) {
+  const from = Math.max(0, start);
+  const to = Math.min(data.length, end);
+  let total = 0;
+
+  for (let index = from; index < to; index += 1) {
+    total += data[index];
+  }
+
+  return total / Math.max(1, to - from) / 255;
 }
 
 function renderLoading(reset) {
@@ -659,7 +1059,11 @@ function playStation(station, streamIndex = 0) {
   state.currentStation = station;
   state.currentStreamIndex = streamIndex;
   saveRecentStation(station);
-  els.audioPlayer.src = streamUrl;
+  els.audioPlayer.crossOrigin = "anonymous";
+  els.audioPlayer.src = getAudioPlaybackUrl(streamUrl);
+  if (state.visualizerOpen) {
+    startVisualizer();
+  }
   els.audioPlayer.play().catch(() => {
     setStatus("El navegador ha bloquejat la reproduccio", "error");
     updatePlayerStatus("Reproduccio bloquejada");
@@ -673,6 +1077,19 @@ function playStation(station, streamIndex = 0) {
   if (station.source === "Radio Browser") {
     fetch(`${API_BASE}/json/url/${station.stationuuid}`).catch(() => {});
   }
+}
+
+function getAudioPlaybackUrl(streamUrl) {
+  if (!canUseLocalProxy()) {
+    return streamUrl;
+  }
+
+  return `/stream?url=${encodeURIComponent(streamUrl)}`;
+}
+
+function canUseLocalProxy() {
+  return location.protocol === "http:"
+    && ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
 }
 
 function saveRecentStation(station) {

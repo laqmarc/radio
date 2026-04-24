@@ -12,9 +12,13 @@ Web estatica per explorar emissores de radio de [Radio Browser](https://www.radi
 - Reproductor d'audio fix a la part inferior.
 - Estat de reproduccio: connectant, reproduint i error.
 - Reintent automatic amb un altre stream quan IPRD en te mes d'un.
+- Visualitzador de so amb boto d'ull, pantalla completa i modes `Barres` i `Ona`, optimitzats per seguir l'audio real quan s'executa amb `npm start`.
+  - Les barres representen bandes de frequencia: greus a l'esquerra, mitjos al centre i aguts a la dreta.
 - Modal de detall amb font, web oficial, tags, metadades i URL del stream.
 - Favorits persistents amb `localStorage`.
 - Historial de les ultimes emissores escoltades amb el preset `Recents`.
+- Filtres de qualitat: nomes HTTPS, amagar HLS, emissores amb logo i bitrate minim.
+- Boto `Aleatoria` per reproduir una emissora dels resultats carregats.
 - Paginacio amb boto `Carrega mes`.
 - Filtre `hidebroken=true` per evitar emissores marcades com trencades.
 
@@ -30,19 +34,29 @@ app.js       Connexio amb l'API, filtres, favorits i reproductor
 
 No cal instal-lar dependecies ni fer build.
 
-Obre `index.html` directament al navegador.
-
-Si algun navegador bloqueja peticions o audio obrint el fitxer localment, pots servir la carpeta amb un servidor simple:
+Per tenir reproduccio i visualitzador real sincronitzat amb la musica, executa el servidor local:
 
 ```bash
-python -m http.server 8000
+npm start
 ```
 
-I obrir:
+O directament:
+
+```bash
+node server.js
+```
+
+I obre:
 
 ```text
 http://localhost:8000
 ```
+
+El servidor inclou un proxy de streams a `/stream`, necessari perque el navegador permeti analitzar l'audio amb Web Audio.
+
+També pots obrir `index.html` directament al navegador, pero molts streams no permetran visualitzacio real per CORS.
+
+Un servidor simple com `python -m http.server` pot servir la web, pero no inclou el proxy de streams i per tant no garanteix visualitzacio real amb la musica.
 
 ## APIs
 

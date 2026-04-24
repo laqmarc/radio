@@ -64,14 +64,33 @@
         </label>
       </section>
 
+      <section class="quality-row" aria-label="Filtres de qualitat">
+        <label class="toggle-field">
+          <input id="httpsOnlyInput" type="checkbox">
+          <span>Nomes HTTPS</span>
+        </label>
+        <label class="toggle-field">
+          <input id="hideHlsInput" type="checkbox">
+          <span>Amaga HLS</span>
+        </label>
+        <label class="toggle-field">
+          <input id="logoOnlyInput" type="checkbox">
+          <span>Amb logo</span>
+        </label>
+        <label class="bitrate-field">
+          <span>Bitrate minim</span>
+          <input id="minBitrateInput" type="number" min="0" max="512" step="32" placeholder="0">
+        </label>
+      </section>
+
       <section class="quick-row" aria-label="Accions rapides">
         <button class="chip active" type="button" data-preset="all">Totes</button>
         <button class="chip" type="button" data-preset="favorites">Favorites</button>
         <button class="chip" type="button" data-preset="recent">Recents</button>
-        <!-- <button class="chip" type="button" data-preset="es">Espanya</button> -->
         <button class="chip" type="button" data-preset="ca">Catala</button>
         <button class="chip" type="button" data-preset="music">Musica</button>
         <button class="chip" type="button" data-preset="news">Noticies</button>
+        <button class="chip" type="button" id="randomButton">Aleatoria</button>
       </section>
 
       <section class="results-head">
@@ -93,9 +112,22 @@
       <div class="player-art" id="playerArt">RA</div>
       <div class="player-info">
         <p id="playerName">Cap emissora seleccionada</p>
-        <span id="playerMeta">Tria una radio per escoltar-la</span>
+        <div class="player-status">
+          <span id="playerMeta">Tria una radio per escoltar-la</span>
+          <button class="visualizer-toggle" id="visualizerToggle" type="button" aria-label="Mostra visualitzador">
+            <span class="eye-icon" aria-hidden="true"></span>
+          </button>
+        </div>
       </div>
       <audio id="audioPlayer" controls preload="none"></audio>
+      <section class="visualizer-panel" id="visualizerPanel" hidden aria-label="Visualitzador de so">
+        <div class="visualizer-modes">
+          <button class="mode-button active" type="button" data-visualizer-mode="bars">Barres</button>
+          <button class="mode-button" type="button" data-visualizer-mode="wave">Ona</button>
+          <button class="mode-button fullscreen-button" type="button" id="fullscreenVisualizerButton">Pantalla completa</button>
+        </div>
+        <canvas id="visualizerCanvas" width="960" height="260"></canvas>
+      </section>
     </aside>
 
     <script src="app.js"></script>
