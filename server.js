@@ -9,6 +9,7 @@ const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
   ".md": "text/markdown; charset=utf-8",
 };
 
@@ -32,6 +33,16 @@ const server = http.createServer((req, res) => {
 
   if (requestUrl.pathname === "/metadata") {
     streamMetadata(requestUrl, req, res);
+    return;
+  }
+
+  if (requestUrl.pathname === "/sources/casterclub") {
+    getCasterClubStations(requestUrl, res);
+    return;
+  }
+
+  if (requestUrl.pathname === "/sources/casterclub/station") {
+    getCasterClubStation(requestUrl, res);
     return;
   }
 
@@ -260,4 +271,234 @@ function sendMetadataEvent(res, payload) {
   if (!res.destroyed) {
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   }
+}
+
+function getCasterClubStations(requestUrl, res) {
+  const page = Math.max(1, Number(requestUrl.searchParams.get("page")) || 1);
+  const target = new URL("https://yp.casterclub.com/directory.php");
+
+  target.searchParams.set("page", String(page));
+  target.searchParams.set("sort", mapCasterClubSort(requestUrl.searchParams.get("order")));
+  target.searchParams.set("dir", requestUrl.searchParams.get("order") === "name" ? "asc" : "desc");
+
+  const search = requestUrl.searchParams.get("search");
+  if (search) target.searchParams.set("search", search.slice(0, 120));
+
+  const codec = mapCasterClubCodec(requestUrl.searchParams.get("codec"));
+  if (codec) target.searchParams.set("format", codec);
+
+  const genre = mapCasterClubGenre(requestUrl.searchParams.get("preset"));
+  if (genre) target.searchParams.set("genre", genre);
+
+  requestText(target, (error, html) => {
+    if (error) {
+      sendJson(res, 502, { error: "No s'ha pogut llegir CasterClub" });
+      return;
+    }
+
+    sendJson(res, 200, {
+      source: "CasterClub",
+      page,
+      stations: parseCasterClubDirectory(html),
+    });
+  });
+}
+
+function getCasterClubStation(requestUrl, res) {
+  const id = requestUrl.searchParams.get("id");
+  if (!id || !/^\d+$/.test(id)) {
+    sendJson(res, 400, { error: "Missing station id" });
+    return;
+  }
+
+  const target = new URL("https://yp.casterclub.com/station-detail.php");
+  target.searchParams.set("id", id);
+
+  requestText(target, (error, html) => {
+    if (error) {
+      sendJson(res, 502, { error: "No s'ha pogut llegir CasterClub" });
+      return;
+    }
+
+    const station = parseCasterClubDetail(html, id);
+    if (!station) {
+      sendJson(res, 404, { error: "Emissora no trobada" });
+      return;
+    }
+
+    sendJson(res, 200, { source: "CasterClub", station });
+  });
+}
+
+function requestText(target, callback, redirectCount = 0) {
+  const targetUrl = target instanceof URL ? target : new URL(target);
+  const transport = targetUrl.protocol === "https:" ? https : http;
+  const req = transport.get(targetUrl, {
+    headers: {
+      "User-Agent": "RadioQuexulo/1.0 (+https://radio.quexulo.cat)",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+  }, (upstreamRes) => {
+    if ([301, 302, 303, 307, 308].includes(upstreamRes.statusCode) && upstreamRes.headers.location && redirectCount < 5) {
+      upstreamRes.resume();
+      requestText(new URL(upstreamRes.headers.location, targetUrl), callback, redirectCount + 1);
+      return;
+    }
+
+    if ((upstreamRes.statusCode || 500) >= 400) {
+      upstreamRes.resume();
+      callback(new Error(`HTTP ${upstreamRes.statusCode}`));
+      return;
+    }
+
+    const chunks = [];
+    upstreamRes.setEncoding("utf8");
+    upstreamRes.on("data", (chunk) => chunks.push(chunk));
+    upstreamRes.on("end", () => callback(null, chunks.join("")));
+  });
+
+  req.setTimeout(12000, () => req.destroy(new Error("Timeout")));
+  req.on("error", callback);
+}
+
+function parseCasterClubDirectory(html) {
+  const stations = [];
+  const rowPattern = /<tr\b[^>]*class="[^"]*\bstn-row\b[^"]*"[^>]*>/gi;
+  let match;
+
+  while ((match = rowPattern.exec(html))) {
+    const attrs = extractDataAttributes(match[0]);
+    if (!attrs.id || !attrs.name || !attrs.listenUrl) continue;
+
+    stations.push({
+      id: attrs.id,
+      name: attrs.name,
+      country: attrs.country || "",
+      genre: attrs.genres || "",
+      bitrate: Number(attrs.bitrate) || 0,
+      codec: codecFromContentType(attrs.serverType),
+      serverType: attrs.serverType || "",
+      streamUrl: attrs.listenUrl,
+      listeners: Number(attrs.listeners) || 0,
+      peak: Number(attrs.peak) || 0,
+      nowPlaying: attrs.nowPlaying || "",
+      description: attrs.description || "",
+      homepage: `https://yp.casterclub.com/station-detail.php?id=${encodeURIComponent(attrs.id)}`,
+      status: attrs.status || "",
+    });
+  }
+
+  return stations;
+}
+
+function parseCasterClubDetail(html, id) {
+  const listenUrl = decodeHtml((html.match(/Listen URL[\s\S]{0,260}<a[^>]+href="(https?:\/\/[^"]+)"/i) || [])[1] || "");
+  const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i) || html.match(/<h2[^>]*>([^<]+)<\/h2>/i);
+  const name = pickCasterClubDetail(html, "Station Name") || decodeHtml((titleMatch || [])[1] || "");
+
+  if (!listenUrl || !name) return null;
+
+  const genre = pickCasterClubDetail(html, "Primary Genre");
+  const serverType = pickCasterClubDetail(html, "Server Type");
+
+  return {
+    id,
+    name,
+    country: pickCasterClubDetail(html, "Server Location"),
+    genre,
+    bitrate: Number((pickCasterClubDetail(html, "Bitrate").match(/\d+/) || [])[0]) || 0,
+    codec: codecFromContentType(serverType),
+    serverType,
+    streamUrl: listenUrl,
+    listeners: Number((pickCasterClubDetail(html, "Listeners Now").match(/\d+/) || [])[0]) || 0,
+    peak: Number((pickCasterClubDetail(html, "Listeners Peak").match(/\d+/) || [])[0]) || 0,
+    nowPlaying: pickCasterClubDetail(html, "Current Song"),
+    description: "",
+    homepage: `https://yp.casterclub.com/station-detail.php?id=${encodeURIComponent(id)}`,
+    status: pickCasterClubDetail(html, "Stream Status"),
+  };
+}
+
+function pickCasterClubDetail(html, label) {
+  const labelMatch = new RegExp(escapeRegExp(label), "i").exec(html);
+  if (!labelMatch) return "";
+
+  const slice = html.slice(labelMatch.index, labelMatch.index + 600);
+  const valueMatch = slice.match(/<span[^>]*class="[^"]*\bkv-val\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+  if (!valueMatch) return "";
+
+  return decodeHtml(stripTags(valueMatch[1]).replace(/\s+/g, " "));
+}
+
+function extractDataAttributes(tag) {
+  const attrs = {};
+  const attrPattern = /data-stn-([a-z-]+)="([^"]*)"/gi;
+  let match;
+
+  while ((match = attrPattern.exec(tag))) {
+    attrs[toCamelCase(match[1])] = decodeHtml(match[2]);
+  }
+
+  return attrs;
+}
+
+function mapCasterClubSort(order) {
+  if (order === "name") return "name";
+  if (order === "changetimestamp") return "reliability";
+  if (order === "votes") return "reliability";
+  return "listeners";
+}
+
+function mapCasterClubCodec(codec) {
+  const normalized = String(codec || "").toUpperCase();
+  if (normalized === "MP3") return "MP3";
+  if (normalized === "AAC" || normalized === "AAC+") return "AAC";
+  if (normalized === "OGG" || normalized === "OGG VORBIS") return "OGG";
+  if (normalized === "OPUS") return "OPUS";
+  return "";
+}
+
+function mapCasterClubGenre(preset) {
+  if (preset === "news") return "Talk";
+  return "";
+}
+
+function codecFromContentType(contentType) {
+  const value = String(contentType || "").toLowerCase();
+  if (value.includes("mpeg") || value.includes("mp3")) return "MP3";
+  if (value.includes("aac")) return "AAC";
+  if (value.includes("ogg")) return "OGG";
+  if (value.includes("opus")) return "OPUS";
+  return contentType || "";
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function toCamelCase(value) {
+  return value.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#039;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+function stripTags(value) {
+  return String(value || "").replace(/<[^>]*>/g, " ");
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

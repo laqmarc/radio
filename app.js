@@ -1,6 +1,7 @@
 const API_BASE = "https://de1.api.radio-browser.info";
 const IPRD_CATALOG_URL = "https://iprd-org.github.io/iprd/site_data/metadata/catalog.json";
 const CUSTOM_CATALOG_URL = "data/custom-stations.json";
+const CASTERCLUB_SOURCE_URL = "/sources/casterclub";
 const PAGE_SIZE = 50;
 const FAVORITES_KEY = "radio-atlas-favorites";
 const RECENTS_KEY = "radio-atlas-recents";
@@ -220,6 +221,10 @@ async function loadStationsForSelectedSource() {
     return loadCustomStations();
   }
 
+  if (els.sourceSelect.value === "casterclub") {
+    return loadCasterClubStations();
+  }
+
   return loadAllSourcesStations();
 }
 
@@ -228,16 +233,17 @@ async function loadAllSourcesStations() {
     loadCustomStations(),
     loadRadioBrowserStations(),
     loadIprdStations(),
+    loadCasterClubStations(),
   ]);
-  const [customStations, radioBrowserStations, iprdStations] = results.map((result) => (
+  const [customStations, radioBrowserStations, iprdStations, casterClubStations] = results.map((result) => (
     result.status === "fulfilled" ? result.value : []
   ));
 
-  if (!customStations.length && !radioBrowserStations.length && !iprdStations.length) {
+  if (!customStations.length && !radioBrowserStations.length && !iprdStations.length && !casterClubStations.length) {
     throw new Error("Cap font ha retornat emissores");
   }
 
-  return dedupeStations(interleaveStations(customStations, radioBrowserStations, iprdStations)).slice(0, PAGE_SIZE);
+  return dedupeStations(interleaveStations(customStations, radioBrowserStations, iprdStations, casterClubStations)).slice(0, PAGE_SIZE);
 }
 
 async function loadRadioBrowserStations() {
@@ -268,6 +274,44 @@ async function loadCustomStations() {
     .slice(state.offset, state.offset + PAGE_SIZE)
     .map(normalizeCustomStation)
     .filter(matchesQualityFilters);
+}
+
+async function loadCasterClubStations() {
+  const firstPage = Math.floor(state.offset / PAGE_SIZE) * 2 + 1;
+  const pages = await Promise.all([
+    fetchCasterClubPage(firstPage),
+    fetchCasterClubPage(firstPage + 1),
+  ]);
+  return pages
+    .flat()
+    .map(normalizeCasterClubStation)
+    .filter(matchesCasterClubClientFilters)
+    .filter(matchesQualityFilters)
+    .slice(0, PAGE_SIZE);
+}
+
+async function fetchCasterClubPage(page) {
+  const params = new URLSearchParams({
+    page,
+    order: els.orderSelect.value,
+    preset: state.preset,
+  });
+  const search = els.searchInput.value.trim();
+  if (search) params.set("search", search);
+  if (els.codecSelect.value) params.set("codec", els.codecSelect.value);
+
+  const response = await fetch(`${CASTERCLUB_SOURCE_URL}?${params.toString()}`, {
+    headers: {
+      "Accept": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`CasterClub ha retornat ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload.stations) ? payload.stations : [];
 }
 
 function interleaveStations(...groups) {
@@ -603,6 +647,52 @@ function normalizeCustomStation(station) {
     statLabel: "Prioritat",
     statValue: station.priority || "n/d",
   };
+}
+
+function normalizeCasterClubStation(station) {
+  const genreTags = String(station.genre || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+
+  return {
+    stationuuid: `casterclub:${station.id || station.name}`,
+    shareSource: "casterclub",
+    shareId: station.id || station.name,
+    name: station.name,
+    country: station.country || "",
+    state: "",
+    language: "",
+    codec: station.codec || "",
+    bitrate: station.bitrate || 0,
+    favicon: "",
+    homepage: station.homepage || "",
+    source: "CasterClub",
+    streamUrl: station.streamUrl,
+    streamUrls: [station.streamUrl].filter(Boolean),
+    url: station.streamUrl,
+    url_resolved: station.streamUrl,
+    hls: String(station.streamUrl || "").toLowerCase().includes(".m3u8") ? 1 : 0,
+    tagsList: [...new Set(genreTags.length ? genreTags : ["radio"])],
+    statLabel: "Oients",
+    statValue: station.listeners || 0,
+    nowPlayingTitle: station.nowPlaying || "",
+  };
+}
+
+function matchesCasterClubClientFilters(station) {
+  if (els.countrySelect.value && getCountryCode(station.country) !== els.countrySelect.value) return false;
+  if (els.languageSelect.value) return false;
+
+  if (state.preset === "ca") {
+    const searchable = [station.name, station.country, station.tagsList?.join(" ")]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return searchable.includes("catal") || searchable.includes("andorra");
+  }
+
+  return true;
 }
 
 function getBestIprdStream(station) {
@@ -1221,6 +1311,18 @@ async function fetchStationByRoute(source, id) {
     const catalog = await getCustomCatalog();
     const station = catalog.find((item) => String(item.id || item.name) === id);
     return station ? normalizeCustomStation(station) : null;
+  }
+
+  if (source === "casterclub") {
+    const response = await fetch(`/sources/casterclub/station?id=${encodeURIComponent(id)}`, {
+      headers: {
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload.station ? normalizeCasterClubStation(payload.station) : null;
   }
 
   return null;

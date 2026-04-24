@@ -1,12 +1,12 @@
 # Radio Atlas
 
-Web estatica per explorar emissores de radio de [Radio Browser](https://www.radio-browser.info/), [IPRD](https://iprd-org.github.io/iprd/api/) i un cataleg propi curat, i escoltar-les directament des del navegador.
+Web estatica per explorar emissores de radio de [Radio Browser](https://www.radio-browser.info/), [IPRD](https://iprd-org.github.io/iprd/api/), CasterClub i un cataleg propi curat, i escoltar-les directament des del navegador.
 
 ## Funcionalitats
 
 - Cerca d'emissores per nom.
 - Filtres per pais, idioma i codec.
-- Selector de font: totes, Quexulo, Radio Browser o IPRD.
+- Selector de font: totes, Quexulo, Radio Browser, IPRD o CasterClub.
 - Ordenacio per popularitat, vots, nom o actualitzacio.
 - Presets rapids: totes, favorites, catala, musica i noticies.
 - Reproductor d'audio fix a la part inferior.
@@ -86,7 +86,7 @@ També pot consultar el cataleg JSON d'IPRD:
 https://iprd-org.github.io/iprd/site_data/metadata/catalog.json
 ```
 
-Radio Browser es carrega per pagines amb `limit` i `offset`. IPRD es descarrega com a cataleg JSON i despres es filtra i pagina al navegador. El cataleg propi viu a `data/custom-stations.json`. Quan la font es `Totes`, l'app barreja resultats de totes les fonts i elimina duplicats simples per URL del stream i per nom+pais.
+Radio Browser es carrega per pagines amb `limit` i `offset`. IPRD es descarrega com a cataleg JSON i despres es filtra i pagina al navegador. CasterClub es consulta a traves del servidor local amb `/sources/casterclub`, per evitar problemes de CORS i convertir el seu HTML a dades. El cataleg propi viu a `data/custom-stations.json`. Quan la font es `Totes`, l'app barreja resultats de totes les fonts i elimina duplicats simples per URL del stream i per nom+pais.
 
 Per afegir emissores propies, edita `data/custom-stations.json` i puja el canvi al servidor. La font apareix com `Quexulo` al selector.
 

@@ -40,7 +40,21 @@ Ja esta implementat com a font `Quexulo` al selector de fonts. Quan tries `Totes
 
 ## 2. CasterClub
 
-CasterClub pot servir com a font externa addicional si volem augmentar cataleg. Abans d'integrar-la cal revisar si ofereix un endpoint public estable, quins camps retorna i si permet us directe des del navegador.
+CasterClub ja esta integrat com a font externa.
+
+No sembla tenir encara una API JSON publica estable per al directori, aixi que la integracio passa pel servidor propi:
+
+```text
+/sources/casterclub
+```
+
+Aquest endpoint consulta `https://yp.casterclub.com/directory.php`, llegeix els atributs `data-stn-*` de cada fila i retorna JSON normalitzat per al frontend. Aixo evita problemes de CORS i mante la logica bruta fora del navegador.
+
+Tambe hi ha endpoint de detall per als enllacos compartibles:
+
+```text
+/sources/casterclub/station?id=6161
+```
 
 ## 3. Directoris Icecast
 
