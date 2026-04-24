@@ -55,6 +55,7 @@ const els = {
   playerMeta: document.querySelector("#playerMeta"),
   playerArt: document.querySelector("#playerArt"),
   visualizerToggle: document.querySelector("#visualizerToggle"),
+  tvToggle: document.querySelector("#tvToggle"),
   visualizerPanel: document.querySelector("#visualizerPanel"),
   visualizerCanvas: document.querySelector("#visualizerCanvas"),
   fullscreenVisualizerButton: document.querySelector("#fullscreenVisualizerButton"),
@@ -80,6 +81,7 @@ init();
 
 async function init() {
   bindEvents();
+  syncFilterDisclosure();
   await Promise.all([loadFilterOptions(), loadStations(true)]);
   await handleInitialRoute();
 }
@@ -101,11 +103,13 @@ function bindEvents() {
   els.randomButton.addEventListener("click", playRandomStation);
   els.loadMoreButton.addEventListener("click", () => loadStations(false));
   els.visualizerToggle.addEventListener("click", toggleVisualizer);
+  els.tvToggle.addEventListener("click", openCurrentStationInTvMode);
   els.fullscreenVisualizerButton.addEventListener("click", toggleVisualizerFullscreen);
   els.tvModeButton.addEventListener("click", toggleTvVisualizerMode);
   els.exitTvButton.addEventListener("click", exitTvMode);
   document.addEventListener("fullscreenchange", resizeVisualizerCanvas);
   window.addEventListener("resize", resizeVisualizerCanvas);
+  window.addEventListener("resize", syncFilterDisclosure);
   window.addEventListener("hashchange", handleInitialRoute);
   els.audioPlayer.addEventListener("loadstart", () => updatePlayerStatus("Connectant..."));
   els.audioPlayer.addEventListener("waiting", () => updatePlayerStatus("Connectant..."));
@@ -122,6 +126,17 @@ function bindEvents() {
   document.querySelectorAll("[data-preset]").forEach((button) => {
     button.addEventListener("click", () => applyPreset(button.dataset.preset));
   });
+}
+
+function syncFilterDisclosure() {
+  const disclosure = document.querySelector(".filter-disclosure");
+  if (!disclosure) return;
+
+  if (window.matchMedia("(max-width: 640px)").matches) {
+    disclosure.removeAttribute("open");
+  } else {
+    disclosure.setAttribute("open", "");
+  }
 }
 
 async function loadFilterOptions() {
@@ -996,8 +1011,8 @@ async function handleInitialRoute() {
 
   const existing = findStationByRoute(route.source, route.id);
   if (existing) {
-    playStation(existing, 0, { updateRoute: false });
     if (isTvRoute()) enterTvMode(existing);
+    playStation(existing, 0, { updateRoute: false });
     return;
   }
 
@@ -1011,8 +1026,8 @@ async function handleInitialRoute() {
 
     state.stations = dedupeStations([station, ...state.stations]);
     renderStations();
-    playStation(station, 0, { updateRoute: false });
     if (isTvRoute()) enterTvMode(station);
+    playStation(station, 0, { updateRoute: false });
   } catch (error) {
     console.error(error);
     setStatus("No s'ha pogut carregar l'enllac", "error");
@@ -1065,6 +1080,10 @@ function getTvUrl(station) {
   return `${location.origin}${location.pathname}?view=tv#/station/${encodeURIComponent(source)}/${encodeURIComponent(id)}`;
 }
 
+function updateTvRoute(station) {
+  history.replaceState(null, "", getTvUrl(station));
+}
+
 function updateStationRoute(station) {
   history.replaceState(null, "", getShareUrl(station));
 }
@@ -1092,6 +1111,26 @@ function enterTvMode(station) {
   startTvClock();
   stopTvVisualizer();
   drawTvVisualizer();
+}
+
+function openStationInTvMode(station) {
+  closeStationDetails();
+  updateTvRoute(station);
+
+  if (state.currentStation?.stationuuid !== station.stationuuid || els.audioPlayer.paused) {
+    playStation(station, 0, { updateRoute: false });
+  }
+
+  enterTvMode(station);
+}
+
+function openCurrentStationInTvMode() {
+  if (!state.currentStation) {
+    setStatus("Tria una emissora abans", "error");
+    return;
+  }
+
+  openStationInTvMode(state.currentStation);
 }
 
 function exitTvMode() {
@@ -1201,7 +1240,7 @@ function showStationDetails(station) {
         ${station.homepage ? `<a href="${escapeAttribute(station.homepage)}" target="_blank" rel="noreferrer">Web oficial</a>` : ""}
         ${streamUrls[0] ? `<a href="${escapeAttribute(streamUrls[0])}" target="_blank" rel="noreferrer">Obre stream</a>` : ""}
         <button class="link-button" type="button" data-share-station="${escapeAttribute(station.stationuuid)}">Comparteix</button>
-        <a href="${escapeAttribute(getTvUrl(station))}" target="_blank" rel="noreferrer">Mode TV</a>
+        <button class="link-button" type="button" data-tv-station="${escapeAttribute(station.stationuuid)}">Mode TV</button>
       </div>
       <label class="stream-field">
         <span>URL stream</span>
@@ -1220,6 +1259,13 @@ function showStationDetails(station) {
     if (shareButton) {
       const stationToShare = findStation(shareButton.dataset.shareStation);
       if (stationToShare) copyStationLink(stationToShare, shareButton);
+      return;
+    }
+
+    const tvButton = event.target.closest("[data-tv-station]");
+    if (tvButton) {
+      const stationForTv = findStation(tvButton.dataset.tvStation);
+      if (stationForTv) openStationInTvMode(stationForTv);
     }
   });
 
@@ -1274,6 +1320,9 @@ function playStation(station, streamIndex = 0, options = {}) {
   els.audioPlayer.play().catch(() => {
     setStatus("El navegador ha bloquejat la reproduccio", "error");
     updatePlayerStatus("Reproduccio bloquejada");
+    if (!els.tvView.hidden) {
+      els.tvStationMeta.textContent = "Prem Sortir i torna a entrar, o inicia la reproduccio manualment";
+    }
   });
 
   els.playerName.textContent = station.name || "Radio sense nom";
