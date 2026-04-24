@@ -1,0 +1,25 @@
+{
+  "name": "Radio Quexulo",
+  "description": "Cataleg propi d'emissores curades. Afegeix aqui les radios que vulguis destacar o garantir dins l'app.",
+  "stations": [
+    {
+      "id": "flaix-938",
+      "name": "Flaix 93.8",
+      "country": "Andorra",
+      "city": "Andorra la Vella",
+      "language": ["catalan"],
+      "website": "https://www.flaixandorra.com/",
+      "logo": "",
+      "priority": 100,
+      "tags": ["catala", "music", "pop", "hits"],
+      "streams": [
+        {
+          "url": "https://streaming.enantena.com:8000/flaixandorra56.mp3",
+          "codec": "MP3",
+          "bitrate": 56,
+          "priority": 100
+        }
+      ]
+    }
+  ]
+}

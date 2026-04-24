@@ -1,12 +1,12 @@
 # Radio Atlas
 
-Web estatica per explorar emissores de radio de [Radio Browser](https://www.radio-browser.info/) i [IPRD](https://iprd-org.github.io/iprd/api/) i escoltar-les directament des del navegador.
+Web estatica per explorar emissores de radio de [Radio Browser](https://www.radio-browser.info/), [IPRD](https://iprd-org.github.io/iprd/api/) i un cataleg propi curat, i escoltar-les directament des del navegador.
 
 ## Funcionalitats
 
 - Cerca d'emissores per nom.
 - Filtres per pais, idioma i codec.
-- Selector de font: totes, Radio Browser o IPRD.
+- Selector de font: totes, Quexulo, Radio Browser o IPRD.
 - Ordenacio per popularitat, vots, nom o actualitzacio.
 - Presets rapids: totes, favorites, catala, musica i noticies.
 - Reproductor d'audio fix a la part inferior.
@@ -28,9 +28,11 @@ Web estatica per explorar emissores de radio de [Radio Browser](https://www.radi
 ## Fitxers
 
 ```text
-index.html   Estructura de la pagina
-styles.css   Estils responsive
-app.js       Connexio amb l'API, filtres, favorits i reproductor
+index.html                 Estructura de la pagina
+styles.css                 Estils responsive
+app.js                     Connexio amb fonts, filtres, favorits i reproductor
+data/custom-stations.json  Cataleg propi d'emissores curades
+FONTS-RADIO.md             Pla per afegir mes fonts
 ```
 
 ## Com executar-ho
@@ -84,7 +86,9 @@ També pot consultar el cataleg JSON d'IPRD:
 https://iprd-org.github.io/iprd/site_data/metadata/catalog.json
 ```
 
-Radio Browser es carrega per pagines amb `limit` i `offset`. IPRD es descarrega com a cataleg JSON i despres es filtra i pagina al navegador. Quan la font es `Totes`, l'app barreja resultats de les dues APIs i elimina duplicats simples per URL del stream i per nom+pais.
+Radio Browser es carrega per pagines amb `limit` i `offset`. IPRD es descarrega com a cataleg JSON i despres es filtra i pagina al navegador. El cataleg propi viu a `data/custom-stations.json`. Quan la font es `Totes`, l'app barreja resultats de totes les fonts i elimina duplicats simples per URL del stream i per nom+pais.
+
+Per afegir emissores propies, edita `data/custom-stations.json` i puja el canvi al servidor. La font apareix com `Quexulo` al selector.
 
 ## Notes
 

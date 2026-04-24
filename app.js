@@ -1,5 +1,6 @@
 const API_BASE = "https://de1.api.radio-browser.info";
 const IPRD_CATALOG_URL = "https://iprd-org.github.io/iprd/site_data/metadata/catalog.json";
+const CUSTOM_CATALOG_URL = "data/custom-stations.json";
 const PAGE_SIZE = 50;
 const FAVORITES_KEY = "radio-atlas-favorites";
 const RECENTS_KEY = "radio-atlas-recents";
@@ -14,6 +15,7 @@ const state = {
   recents: readRecents(),
   hasMore: true,
   iprdStations: null,
+  customStations: null,
   currentStation: null,
   currentStreamIndex: 0,
   visualizerOpen: false,
@@ -214,23 +216,28 @@ async function loadStationsForSelectedSource() {
     return loadIprdStations();
   }
 
+  if (els.sourceSelect.value === "custom") {
+    return loadCustomStations();
+  }
+
   return loadAllSourcesStations();
 }
 
 async function loadAllSourcesStations() {
   const results = await Promise.allSettled([
+    loadCustomStations(),
     loadRadioBrowserStations(),
     loadIprdStations(),
   ]);
-  const [radioBrowserStations, iprdStations] = results.map((result) => (
+  const [customStations, radioBrowserStations, iprdStations] = results.map((result) => (
     result.status === "fulfilled" ? result.value : []
   ));
 
-  if (!radioBrowserStations.length && !iprdStations.length) {
+  if (!customStations.length && !radioBrowserStations.length && !iprdStations.length) {
     throw new Error("Cap font ha retornat emissores");
   }
 
-  return dedupeStations(interleaveStations(radioBrowserStations, iprdStations)).slice(0, PAGE_SIZE);
+  return dedupeStations(interleaveStations(customStations, radioBrowserStations, iprdStations)).slice(0, PAGE_SIZE);
 }
 
 async function loadRadioBrowserStations() {
@@ -248,6 +255,18 @@ async function loadIprdStations() {
   return filtered
     .slice(state.offset, state.offset + PAGE_SIZE)
     .map(normalizeIprdStation)
+    .filter(matchesQualityFilters);
+}
+
+async function loadCustomStations() {
+  const catalog = await getCustomCatalog();
+  const filtered = catalog
+    .filter(matchesCustomFilters)
+    .sort(sortCustomStations);
+
+  return filtered
+    .slice(state.offset, state.offset + PAGE_SIZE)
+    .map(normalizeCustomStation)
     .filter(matchesQualityFilters);
 }
 
@@ -372,6 +391,27 @@ async function getIprdCatalog() {
   return state.iprdStations;
 }
 
+async function getCustomCatalog() {
+  if (state.customStations) {
+    return state.customStations;
+  }
+
+  const response = await fetch(CUSTOM_CATALOG_URL, {
+    cache: "no-store",
+    headers: {
+      "Accept": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cataleg Quexulo ha retornat ${response.status}`);
+  }
+
+  const catalog = await response.json();
+  state.customStations = Array.isArray(catalog.stations) ? catalog.stations : [];
+  return state.customStations;
+}
+
 function fillSelect(select, items, labelKey, valueKey, defaultLabel) {
   const currentValue = select.value;
   select.replaceChildren(new Option(defaultLabel, ""));
@@ -412,6 +452,30 @@ function matchesIprdFilters(station) {
   return streams.some((stream) => stream.url);
 }
 
+function matchesCustomFilters(station) {
+  const search = els.searchInput.value.trim().toLowerCase();
+  const tags = Array.isArray(station.tags) ? station.tags : [];
+  const streams = Array.isArray(station.streams) ? station.streams : [];
+  const searchableText = [
+    station.name,
+    station.country,
+    station.city,
+    station.language,
+    station.website,
+    ...tags,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (search && !searchableText.includes(search)) return false;
+  if (els.countrySelect.value && getCountryCode(station.country) !== els.countrySelect.value) return false;
+  if (els.languageSelect.value && !hasCustomLanguage(station, els.languageSelect.value.toLowerCase())) return false;
+  if (els.codecSelect.value && !streams.some((stream) => String(stream.codec || "").toLowerCase() === els.codecSelect.value.toLowerCase())) return false;
+  if (state.preset === "music" && !hasCustomTerm(station, "music") && !hasCustomTerm(station, "musica")) return false;
+  if (state.preset === "news" && !hasCustomTerm(station, "news") && !hasCustomTerm(station, "noticies")) return false;
+  if (state.preset === "ca" && !hasCustomLanguage(station, "catalan") && !hasCustomLanguage(station, "catala") && !hasCustomTerm(station, "catala")) return false;
+
+  return streams.some((stream) => stream.url);
+}
+
 function hasIprdTerm(station, term) {
   const values = []
     .concat(station.tags || [])
@@ -421,6 +485,17 @@ function hasIprdTerm(station, term) {
 }
 
 function hasIprdLanguage(station, language) {
+  const languages = Array.isArray(station.language) ? station.language : [station.language];
+  return languages.some((value) => String(value).toLowerCase() === language);
+}
+
+function hasCustomTerm(station, term) {
+  return (station.tags || [])
+    .map((value) => String(value).toLowerCase())
+    .some((value) => value.includes(term));
+}
+
+function hasCustomLanguage(station, language) {
   const languages = Array.isArray(station.language) ? station.language : [station.language];
   return languages.some((value) => String(value).toLowerCase() === language);
 }
@@ -437,6 +512,17 @@ function sortIprdStations(a, b) {
   }
 
   return getBestReliability(b) - getBestReliability(a);
+}
+
+function sortCustomStations(a, b) {
+  const order = els.orderSelect.value;
+
+  if (order === "name") {
+    return String(a.name || "").localeCompare(String(b.name || ""), "ca", { sensitivity: "base" });
+  }
+
+  return (Number(b.priority) || 0) - (Number(a.priority) || 0)
+    || String(a.name || "").localeCompare(String(b.name || ""), "ca", { sensitivity: "base" });
 }
 
 function getBestReliability(station) {
@@ -490,6 +576,35 @@ function normalizeIprdStation(station) {
   };
 }
 
+function normalizeCustomStation(station) {
+  const streams = getSortedCustomStreams(station);
+  const stream = streams[0] || {};
+  const tagsList = Array.isArray(station.tags) ? station.tags.filter(Boolean) : [];
+
+  return {
+    stationuuid: `custom:${station.id || station.name}`,
+    shareSource: "custom",
+    shareId: station.id || station.name,
+    name: station.name,
+    country: station.country,
+    state: station.city || "",
+    language: Array.isArray(station.language) ? station.language.join(", ") : station.language,
+    codec: stream.codec || "",
+    bitrate: stream.bitrate || 0,
+    favicon: station.logo || "",
+    homepage: station.website || "",
+    source: "Quexulo",
+    streamUrl: stream.url,
+    streamUrls: streams.map((item) => item.url).filter(Boolean),
+    url: stream.url,
+    url_resolved: stream.url,
+    hls: String(stream.url || "").toLowerCase().includes(".m3u8") ? 1 : 0,
+    tagsList: [...new Set(tagsList)],
+    statLabel: "Prioritat",
+    statValue: station.priority || "n/d",
+  };
+}
+
 function getBestIprdStream(station) {
   return getSortedIprdStreams(station)[0] || {};
 }
@@ -502,6 +617,16 @@ function getSortedIprdStreams(station) {
       const reliabilityDiff = (Number(b.reliability) || 0) - (Number(a.reliability) || 0);
       return reliabilityDiff || ((Number(b.bitrate) || 0) - (Number(a.bitrate) || 0));
     });
+}
+
+function getSortedCustomStreams(station) {
+  const streams = Array.isArray(station.streams) ? station.streams : [];
+  return streams
+    .filter((stream) => stream.url)
+    .sort((a, b) => (
+      (Number(b.priority) || 0) - (Number(a.priority) || 0)
+      || (Number(b.bitrate) || 0) - (Number(a.bitrate) || 0)
+    ));
 }
 
 function getCountryCode(countryName) {
@@ -1090,6 +1215,12 @@ async function fetchStationByRoute(source, id) {
     const catalog = await getIprdCatalog();
     const station = catalog.find((item) => String(item.id || item.name) === id);
     return station ? normalizeIprdStation(station) : null;
+  }
+
+  if (source === "custom") {
+    const catalog = await getCustomCatalog();
+    const station = catalog.find((item) => String(item.id || item.name) === id);
+    return station ? normalizeCustomStation(station) : null;
   }
 
   return null;
