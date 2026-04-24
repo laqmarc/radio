@@ -1175,8 +1175,6 @@ function renderRecents() {
 function renderStationCard(station) {
   const title = escapeHtml(station.name || "Radio sense nom");
   const location = escapeHtml([station.country, station.state, station.source].filter(Boolean).join(" - ") || "Ubicacio desconeguda");
-  const codec = escapeHtml(station.codec || "n/d");
-  const bitrate = station.bitrate ? `${station.bitrate} kbps` : "n/d";
   const tags = (station.tagsList || String(station.tags || "").split(","))
     .map((tag) => String(tag).trim())
     .filter(Boolean)
@@ -1198,11 +1196,6 @@ function renderStationCard(station) {
       </div>
       <div class="tags">
         ${tags.length ? tags.map((tag) => `<button class="tag tag-button" type="button" data-tag-search="${escapeAttribute(tag)}">${escapeHtml(tag)}</button>`).join("") : `<button class="tag tag-button" type="button" data-tag-search="radio">radio</button>`}
-      </div>
-      <div class="station-stats">
-        <div class="stat"><span>Codec</span><strong>${codec}</strong></div>
-        <div class="stat"><span>Bitrate</span><strong>${bitrate}</strong></div>
-        <div class="stat"><span>${escapeHtml(station.statLabel || "Vots")}</span><strong>${escapeHtml(station.statValue ?? station.votes ?? 0)}</strong></div>
       </div>
       <div class="station-actions">
         <button class="station-action play" type="button" data-play="${escapeAttribute(station.stationuuid)}">Escolta</button>
