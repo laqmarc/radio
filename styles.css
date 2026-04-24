@@ -615,6 +615,103 @@ audio {
   display: none;
 }
 
+.equalizer-toolbar {
+  display: grid;
+  grid-template-columns: auto auto minmax(180px, 220px) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.equalizer-select-field,
+.equalizer-preamp-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.equalizer-select-field select,
+.equalizer-preamp-field input {
+  min-height: 34px;
+}
+
+.equalizer-preamp-field {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.equalizer-preamp-field span,
+.equalizer-preamp-field strong {
+  margin: 0;
+}
+
+.equalizer-preamp-field strong {
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.equalizer-support-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.equalizer-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.equalizer-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(42px, 1fr);
+  gap: 8px;
+  align-items: end;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 6px 0 10px;
+  scrollbar-width: thin;
+}
+
+.equalizer-band {
+  display: grid;
+  grid-template-rows: auto minmax(132px, 1fr) auto;
+  justify-items: center;
+  gap: 8px;
+  min-width: 42px;
+}
+
+.equalizer-gain,
+.equalizer-frequency {
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.equalizer-gain {
+  color: var(--accent-dark);
+  font-weight: 700;
+}
+
+.equalizer-frequency {
+  color: var(--muted);
+}
+
+.equalizer-slider {
+  width: 132px;
+  height: 28px;
+  margin: 52px 0;
+  accent-color: var(--accent);
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
 .visualizer-modes {
   display: flex;
   flex-wrap: wrap;
@@ -1133,9 +1230,14 @@ audio {
     grid-column: 1 / -1;
   }
 
-  .equalizer-toolbar,
-  .equalizer-grid {
+  .equalizer-toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .equalizer-grid {
+    grid-auto-columns: 52px;
+    gap: 10px;
+    padding-bottom: 12px;
   }
 
   .equalizer-preamp-field {
@@ -1144,17 +1246,16 @@ audio {
   }
 
   .equalizer-band {
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    justify-items: stretch;
-    gap: 8px;
+    grid-template-rows: auto minmax(120px, 1fr) auto;
+    justify-items: center;
+    gap: 6px;
   }
 
   .equalizer-slider {
-    width: 100%;
-    height: 34px;
-    margin: 0;
-    transform: none;
+    width: 120px;
+    height: 28px;
+    margin: 46px 0;
+    transform: rotate(-90deg);
   }
 
   .player-info p {
