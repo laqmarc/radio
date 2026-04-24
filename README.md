@@ -220,3 +220,7 @@ Punts importants:
 ## Fitxers relacionats
 
 - `FONTS-RADIO.md`: notes sobre com ampliar fonts de radio.
+
+## Cosese a afegir
+
+- Equalitzador per poder filtrar bé 
